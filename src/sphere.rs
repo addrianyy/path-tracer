@@ -1,21 +1,28 @@
 use crate::vec::Vec3;
 use crate::ray::Ray;
-use crate::material_manager::MaterialHandle;
+use crate::material::SharedMaterial;
 use crate::traceable_object::{HitRecord, TraceableObject};
 
 pub struct Sphere {
     center:   Vec3,
     radius:   f32,
-    material: MaterialHandle, 
+    material: SharedMaterial, 
 }
 
 impl Sphere {
-    pub fn new(center: Vec3, radius: f32, material: MaterialHandle) -> Self {
+    pub fn new(center: Vec3, radius: f32, material: &SharedMaterial) -> Self {
         Self {
             center,
             radius,
-            material,
+            material: material.clone(),
         }
+    }
+}
+
+impl Sphere {
+    fn get_record(&self, t: f32, ray: &Ray) -> HitRecord {
+        let point = ray.get_point(t);
+        HitRecord::new(t, point, (point - self.center).normalized(), &*self.material)
     }
 }
 
@@ -30,16 +37,12 @@ impl TraceableObject for Sphere {
         if d > 0.0 {
             let sol = (-b - d.sqrt()) / a;
             if sol < max_t && sol > min_t {
-                let point = ray.get_point(sol);
-                return Some(HitRecord::new(sol, point,
-                    (point - self.center).normalized(), self.material));
+                return Some(self.get_record(sol, ray));
             }
 
             let sol = (-b + d.sqrt()) / a;
             if sol < max_t && sol > min_t {
-                let point = ray.get_point(sol);
-                return Some(HitRecord::new(sol, point, 
-                    (point - self.center).normalized(), self.material));
+                return Some(self.get_record(sol, ray));
             }
         }
 

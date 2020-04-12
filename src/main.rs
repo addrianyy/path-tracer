@@ -7,7 +7,6 @@ mod camera;
 mod material;
 mod lambertian;
 mod metal;
-mod material_manager;
 mod math;
 mod dielectric;
 
@@ -19,7 +18,6 @@ use camera::Camera;
 use metal::Metal;
 use lambertian::Lambertian;
 use dielectric::Dielectric;
-use material_manager::MaterialManager;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -27,16 +25,14 @@ use std::time::Instant;
 use image::ImageBuffer;
 use rand::Rng;
 
-fn trace_ray(ray: &Ray, scene: &Scene, material_manager: &MaterialManager) -> Vec3 {
+fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
     let mut current_attenuation = Vec3::fill(1.0);
     let mut current_ray = *ray;
 
     const RECURSION_LIMIT: usize = 50;
     for _ in 0..RECURSION_LIMIT {
         if let Some(record) = scene.trace(&current_ray) {
-            if let Some((attenuation, new_ray)) = record.get_material(material_manager)
-                    .scatter(&current_ray, &record) {
-            
+            if let Some((attenuation, new_ray)) = record.material.scatter(&current_ray, &record) {
                 current_ray = new_ray;
                 current_attenuation *= attenuation;
             } else {
@@ -53,21 +49,21 @@ fn trace_ray(ray: &Ray, scene: &Scene, material_manager: &MaterialManager) -> Ve
     color * current_attenuation
 }
 
-fn load_scene(scene: &mut Scene, material_manager: &mut MaterialManager) {
-    let matte1 = material_manager.create_material(Lambertian::new(Vec3::new(0.0, 0.2, 0.5)));
-    let matte2 = material_manager.create_material(Lambertian::new(Vec3::new(0.3, 0.0, 0.0)));
-    scene.create_object(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5, matte1));
-    scene.create_object(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0, matte2));
+fn load_scene(scene: &mut Scene) {
+    let matte1 = material::create(Lambertian::new(Vec3::new(0.0, 0.2, 0.5)));
+    let matte2 = material::create(Lambertian::new(Vec3::new(0.3, 0.0, 0.0)));
+    scene.create_object(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5, &matte1));
+    scene.create_object(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0, &matte2));
 
-    let metal1 = material_manager.create_material(Metal::new(Vec3::new(0.8, 0.6, 0.2), 0.0));
-    let glass1 = material_manager.create_material(Dielectric::new(1.8));
-    let glass2 = material_manager.create_material(Dielectric::new(0.4));
-    scene.create_object(Sphere::new(Vec3::new( 1.5, 0.0, -2.0), 0.5, metal1));
-    scene.create_object(Sphere::new(Vec3::new(-1.5, 0.0, -2.0), 0.5, glass1));
-    scene.create_object(Sphere::new(Vec3::new( 3.5, 0.0, -2.0), 0.8, glass2));
+    let metal1 = material::create(Metal::new(Vec3::new(0.8, 0.6, 0.2), 0.0));
+    let glass1 = material::create(Dielectric::new(1.8));
+    let glass2 = material::create(Dielectric::new(0.4));
+    scene.create_object(Sphere::new(Vec3::new( 1.5, 0.0, -2.0), 0.5, &metal1));
+    scene.create_object(Sphere::new(Vec3::new(-1.5, 0.0, -2.0), 0.5, &glass1));
+    scene.create_object(Sphere::new(Vec3::new( 3.5, 0.0, -2.0), 0.8, &glass2));
 
-    let metal2 = material_manager.create_material(Metal::new(Vec3::new(0.1, 1.0, 0.7), 0.1));
-    scene.create_object(Sphere::new(Vec3::new(10.0, 0.0, -10.0), 3.0, metal2));
+    let metal2 = material::create(Metal::new(Vec3::new(0.1, 1.0, 0.7), 0.1));
+    scene.create_object(Sphere::new(Vec3::new(10.0, 0.0, -10.0), 3.0, &metal2));
 }
 
 fn main() {
@@ -83,12 +79,8 @@ fn main() {
     );
     
     let mut scene = Scene::new();
-    let mut material_manager = MaterialManager::new();
-
-    load_scene(&mut scene, &mut material_manager);
-
+    load_scene(&mut scene);
     let scene = Arc::new(scene);
-    let material_manager = Arc::new(material_manager);
 
     let thread_count      = num_cpus::get() * 8;
     let lines_per_thread  = (height + thread_count - 1) / thread_count;
@@ -100,10 +92,9 @@ fn main() {
     let start_time = Instant::now();
 
     for i in 0..thread_count {
-        let scene            = scene.clone();
-        let material_manager = material_manager.clone();
-        let camera           = camera.clone();
-        let start_y          = lines_per_thread * i;
+        let scene   = scene.clone();
+        let camera  = camera.clone();
+        let start_y = lines_per_thread * i;
         
         let pixels_outside_screen = if i + 1 == thread_count {
             let rem = height % thread_count;
@@ -122,7 +113,7 @@ fn main() {
                 let x = i % width;
                 let y = i / width + start_y;
 
-                let num_samples = 100;
+                let num_samples = 50;
                 let mut color_sum = Vec3::zero();
 
                 for _ in 0..num_samples {
@@ -133,7 +124,7 @@ fn main() {
                     let v = 1.0 - (y / height as f32);
 
                     let ray   = camera.get_ray(u, v);
-                    let color = trace_ray(&ray, &scene, &material_manager);
+                    let color = trace_ray(&ray, &scene);
 
                     color_sum += color;
                 }
