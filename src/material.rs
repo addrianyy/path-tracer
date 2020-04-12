@@ -8,7 +8,7 @@ pub trait Material {
     fn scatter(&self, ray: &Ray, record: &HitRecord) -> Option<(Vec3, Ray)>;
 }
 
-pub type SharedMaterial = Arc<dyn Material + 'static + Send + Sync>;
+pub type SharedMaterial = Arc<dyn Material + Send + Sync>;
 
 pub fn create(material: impl Material + 'static + Send + Sync) -> SharedMaterial {
     Arc::new(material)
