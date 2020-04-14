@@ -15,41 +15,51 @@ impl AABB {
         }
     }
 
-    pub fn hits_ray(&self, ray: &Ray, mut min_t: f32, mut max_t: f32) -> bool {
-        for a in 0..3 {
-            let inv_d  = 1.0 / ray.get_direction()[a];
-            let mut t0 = (self.min[a] - ray.get_origin()[a]) * inv_d;
-            let mut t1 = (self.max[a] - ray.get_origin()[a]) * inv_d;
-
-            if inv_d < 0.0 {
-                std::mem::swap(&mut t0, &mut t1);
-            }
-
-            min_t = if t0 > min_t { t0 } else { min_t };
-            max_t = if t1 < max_t { t1 } else { max_t };
-
-            if max_t <= min_t {
-                return false;
-            }
+    pub fn center(&self) -> Vec3 {
+        Vec3 {
+            x: self.min.x + (self.max.x - self.min.x) / 2.0,
+            y: self.min.y + (self.max.y - self.min.y) / 2.0,
+            z: self.min.z + (self.max.z - self.min.z) / 2.0,
         }
-
-        true
     }
 
-    pub fn surrounding_box(box0: &AABB, box1: &AABB) -> AABB {
-        let min = |a: f32, b: f32| if a > b { b } else { a };
-        let max = |a: f32, b: f32| if a < b { b } else { a };
+    pub fn hits_ray(&self, ray: &Ray, min_t: f32, max_t: f32) -> bool {
+        let calc = |a, min_t, max_t| {
+            let inv = 1.0 / ray.get_direction()[a];
+            let t0  = (self.min[a] - ray.get_origin()[a]) * inv;
+            let t1  = (self.max[a] - ray.get_origin()[a]) * inv;
 
+            let (t0, t1) = if inv < 0.0 { (t1, t0) } else { (t0, t1) };
+
+            (t0.max(min_t), t1.min(max_t))
+        };
+
+        let (tmin1, tmax1) = calc(0, min_t, max_t);
+        if tmax1 <= tmin1 {
+            false
+        } else {
+            let (tmin2, tmax2) = calc(1, tmin1, tmax1);
+            if tmax2 <= tmin2 {
+                false
+            } else {
+                let (tmin3, tmax3) = calc(2, tmin2, tmax2);
+                tmax3 > tmin3
+            }
+        }
+    }
+
+    pub fn enclosing_box(box0: &AABB, box1: &AABB) -> AABB {
         let bbmin = Vec3::new(
-            min(box0.min.x, box1.min.x),
-            min(box0.min.y, box1.min.y),
-            min(box0.min.z, box1.min.z));
+            f32::min(box0.min.x, box1.min.x),
+            f32::min(box0.min.y, box1.min.y),
+            f32::min(box0.min.z, box1.min.z));
 
         let bbmax = Vec3::new(
-            max(box0.max.x, box1.max.x),
-            max(box0.max.y, box1.max.y),
-            max(box0.max.z, box1.max.z));
+            f32::max(box0.max.x, box1.max.x),
+            f32::max(box0.max.y, box1.max.y),
+            f32::max(box0.max.z, box1.max.z));
         
         AABB::new(bbmin, bbmax)
     }
+
 }

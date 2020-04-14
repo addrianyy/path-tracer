@@ -39,16 +39,10 @@ impl Scene {
         self.objects.push(Box::new(object));
     }
 
-    pub fn build_bvh(&mut self) {
-        let mut shared_objects = Vec::with_capacity(self.objects.len());
+    pub fn construct_bvh(&mut self) {
+        let mut objects: Vec<_> = self.objects.drain(..).map(Some).collect();
+        self.bvh_root = Some(BvhNode::new(&mut objects));
 
-        for object in self.objects.drain(..) {
-            shared_objects.push(object.into());
-        }
-
-        self.bvh_root = Some(BvhNode::new(&shared_objects));
-
-        println!("Built bounding volume hierarchy.");
+        println!("Constructed bounding volume hierarchy.");
     }
 }
-

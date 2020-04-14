@@ -55,25 +55,25 @@ fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
 
 
 fn load_scene(scene: &mut Scene) {
-    let matte1 = material::create(Lambertian::new(Vec3::new(0.0, 0.2, 0.5)));
-    let matte2 = material::create(Lambertian::new(Vec3::new(0.3, 0.0, 0.0)));
+    let matte1 = Lambertian::new(Vec3::new(0.0, 0.2, 0.5)).create();
+    let matte2 = Lambertian::new(Vec3::new(0.3, 0.0, 0.0)).create();
     scene.create_object(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5, &matte1));
     scene.create_object(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0, &matte2));
 
-    let metal1 = material::create(Metal::new(Vec3::new(0.8, 0.6, 0.2), 0.0));
-    let glass1 = material::create(Dielectric::new(1.8));
-    let glass2 = material::create(Dielectric::new(0.4));
+    let metal1 = Metal::new(Vec3::new(0.8, 0.6, 0.2), 0.0).create();
+    let glass1 = Dielectric::new(1.8).create();
+    let glass2 = Dielectric::new(0.4).create();
     scene.create_object(Sphere::new(Vec3::new( 1.5, 0.0, -2.0), 0.5, &metal1));
     scene.create_object(Sphere::new(Vec3::new(-1.5, 0.0, -2.0), 0.5, &glass1));
     scene.create_object(Sphere::new(Vec3::new( 3.5, 0.0, -2.0), 0.8, &glass2));
 
-    let metal2 = material::create(Metal::new(Vec3::new(0.1, 1.0, 0.7), 0.1));
+    let metal2 = Metal::new(Vec3::new(0.1, 1.0, 0.7), 0.1).create();
     scene.create_object(Sphere::new(Vec3::new(10.0, 0.0, -10.0), 3.0, &metal2));
 }
 
 fn random_scene(scene: &mut Scene) {
     scene.create_object(Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0, 
-        &Lambertian::new(Vec3::new(0.5, 0.5, 0.5)).build()));
+        &Lambertian::new(Vec3::new(0.5, 0.5, 0.5)).create()));
 
     let mut rng = rand::thread_rng();
 
@@ -98,13 +98,13 @@ fn random_scene(scene: &mut Scene) {
 
                 let material = if choose_mat < 0.8 {
                     let albedo = random_vec(0.0, 1.0) * random_vec(0.0, 1.0);
-                    Lambertian::new(albedo).build()
+                    Lambertian::new(albedo).create()
                 } else if choose_mat < 0.95 {
                     let albedo = random_vec(0.5, 1.0);
                     let fuzz   = rng.gen_range(0.0, 0.5);
-                    Metal::new(albedo, fuzz).build()
+                    Metal::new(albedo, fuzz).create()
                 } else {
-                    Dielectric::new(1.5).build()
+                    Dielectric::new(1.5).create()
                 };
 
                 scene.create_object(Sphere::new(center, 0.2, &material));
@@ -113,13 +113,13 @@ fn random_scene(scene: &mut Scene) {
     }
 
     scene.create_object(Sphere::new(Vec3::new(0.0, 1.0, 0.0), 1.0, 
-        &Dielectric::new(1.5).build()));
+        &Dielectric::new(1.5).create()));
 
     scene.create_object(Sphere::new(Vec3::new(-4.0, 1.0, 0.0), 1.0, 
-        &Lambertian::new(Vec3::new(0.4, 0.2, 0.1)).build()));
+        &Lambertian::new(Vec3::new(0.4, 0.2, 0.1)).create()));
 
     scene.create_object(Sphere::new(Vec3::new(4.0, 1.0, 0.0), 1.0, 
-        &Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0).build()));
+        &Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0).create()));
 }
 
 fn main() {
@@ -138,7 +138,7 @@ fn main() {
     let mut scene = Scene::new();
 
     random_scene(&mut scene);
-    scene.build_bvh();
+    scene.construct_bvh();
 
     let scene = Arc::new(scene);
 
@@ -175,8 +175,8 @@ fn main() {
 
                 for sx in 0..num_samples_per_axis {
                     for sy in 0..num_samples_per_axis {
-                        let x = x as f32 + ((sx as f32 / (num_samples_per_axis - 1) as f32)); 
-                        let y = y as f32 + ((sy as f32 / (num_samples_per_axis - 1) as f32));
+                        let x = x as f32 + (sx as f32 / (num_samples_per_axis - 1) as f32); 
+                        let y = y as f32 + (sy as f32 / (num_samples_per_axis - 1) as f32);
 
                         let u = x / width as f32;
                         let v = 1.0 - (y / height as f32);
