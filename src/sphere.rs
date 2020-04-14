@@ -1,5 +1,6 @@
 use crate::vec::Vec3;
 use crate::ray::Ray;
+use crate::aabb::AABB;
 use crate::material::SharedMaterial;
 use crate::traceable_object::{HitRecord, TraceableObject};
 
@@ -47,5 +48,12 @@ impl TraceableObject for Sphere {
         }
 
         None
+    }
+
+    fn bounding_box(&self) -> Option<AABB> {
+        Some(AABB::new(
+            self.center - Vec3::fill(self.radius),
+            self.center + Vec3::fill(self.radius),
+        ))
     }
 }

@@ -9,6 +9,8 @@ mod lambertian;
 mod metal;
 mod math;
 mod dielectric;
+mod aabb;
+mod bvh;
 
 use vec::Vec3;
 use ray::Ray;
@@ -80,6 +82,7 @@ fn main() {
     
     let mut scene = Scene::new();
     load_scene(&mut scene);
+    scene.build_uvh();
     let scene = Arc::new(scene);
 
     let thread_count      = num_cpus::get() * 8;

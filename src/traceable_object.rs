@@ -1,5 +1,6 @@
 use crate::vec::Vec3;
 use crate::ray::Ray;
+use crate::aabb::AABB;
 use crate::material::Material;
 
 pub struct HitRecord<'a> {
@@ -22,4 +23,5 @@ impl<'a> HitRecord<'a> {
 
 pub trait TraceableObject {
     fn trace(&self, ray: &Ray, min_t: f32, max_t: f32) -> Option<HitRecord>; 
+    fn bounding_box(&self) -> Option<AABB>;
 }

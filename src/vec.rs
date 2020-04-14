@@ -1,8 +1,9 @@
 #![allow(dead_code)]
 
+use std::ops::Index;
 use std::ops::{Add, Sub, Mul, Div, Neg, AddAssign, SubAssign, MulAssign, DivAssign};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Default, Debug, Copy, Clone)]
 pub struct Vec3 {
     pub x: f32,
     pub y: f32,
@@ -136,5 +137,18 @@ impl MulAssign for Vec3 {
 impl DivAssign for Vec3 {
     fn div_assign(&mut self, other: Vec3) {
         *self = *self / other;
+    }
+}
+
+impl Index<usize> for Vec3 {
+    type Output = f32;
+
+    fn index(&self, index: usize) -> &f32 {
+        match index {
+            0 => &self.x,
+            1 => &self.y,
+            2 => &self.z,
+            _ => panic!("Invalid Vec3 index {}", index),
+        }
     }
 }
