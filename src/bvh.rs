@@ -1,47 +1,32 @@
-use crate::vec::Vec3;
 use crate::ray::Ray;
 use crate::aabb::AABB;
-use crate::traceable_object::{HitRecord, TraceableObject};
+use crate::traceable_object::{HitRecord, TraceableObject, DynTraceable};
+
 use std::sync::Arc;
 use std::ops::Deref;
 use std::cmp::Ordering;
+use rand::Rng;
 
-fn surrounding_box(box0: AABB, box1: AABB) -> AABB {
-    let min = Vec3::new(
-        box0.min.x.min(box1.min.x),
-        box0.min.y.min(box1.min.y),
-        box0.min.z.min(box1.min.z));
-
-    let max = Vec3::new(
-        box0.max.x.max(box1.max.x),
-        box0.max.y.max(box1.max.y),
-        box0.max.z.max(box1.max.z));
-    
-    AABB::new(min, max)
-}
-
-type Object = dyn TraceableObject + Send + Sync;
-
-pub struct Node {
+pub struct BVHNode {
     bounds: AABB,
-    left:   Arc<Object>,
-    right:  Arc<Object>,
+    left:   Arc<DynTraceable>,
+    right:  Arc<DynTraceable>,
 }
 
-impl Node {
-    pub fn build(objects: &[Arc<Object>]) -> Node {
-        assert!(objects.len() > 0);
+impl BVHNode {
+    pub fn build(objects: &[Arc<DynTraceable>]) -> BVHNode {
+        assert!(!objects.is_empty(), "Cannot build BVH without any objects");
+        
+        let axis = rand::thread_rng().gen_range(0, 3);
 
-        let compare = |a: &dyn TraceableObject, b: &dyn TraceableObject| {
-            a.bounding_box().unwrap().min.y < b.bounding_box().unwrap().min.y
+        let compare = |a: &DynTraceable, b: &DynTraceable| {
+            a.bounding_box().unwrap().min[axis] < b.bounding_box().unwrap().min[axis]
         };
         
         let (left, right) = if objects.len() == 1 {
             let a = objects[0].clone();
             let b = objects[0].clone();
 
-
-            println!("One element");
             (a, b)
         } else if objects.len() == 2 {
             let a = objects[0].clone();
@@ -64,17 +49,18 @@ impl Node {
             });
 
             let mid   = objects.len() / 2;
-            let left  = Node::build(&objects[..mid]);
-            let right = Node::build(&objects[mid..]);
+            let left  = BVHNode::build(&objects[..mid]);
+            let right = BVHNode::build(&objects[mid..]);
 
-            let left:  Arc<Object> = Arc::new(left);
-            let right: Arc<Object> = Arc::new(right);
+            let left:  Arc<DynTraceable> = Arc::new(left);
+            let right: Arc<DynTraceable> = Arc::new(right);
 
             (left, right)
         };
 
-        let bounds = surrounding_box(left.bounding_box().unwrap(),
-            right.bounding_box().unwrap());
+        let bounds = AABB::surrounding_box(
+            &left.bounding_box().unwrap(),
+            &right.bounding_box().unwrap());
 
         Self {
             left,
@@ -84,13 +70,14 @@ impl Node {
     }
 }
 
-impl TraceableObject for Node {
+impl TraceableObject for BVHNode {
     fn trace(&self, ray: &Ray, min_t: f32, mut max_t: f32) -> Option<HitRecord> {
-        if !self.bounds.hit(ray, min_t, max_t) {
+        if !self.bounds.hits_ray(ray, min_t, max_t) {
             return None;
         }
 
         let left = self.left.trace(ray, min_t, max_t);
+
         if let Some(left) = left.as_ref() {
             max_t = left.t;
         }
@@ -102,5 +89,72 @@ impl TraceableObject for Node {
 
     fn bounding_box(&self) -> Option<AABB> {
         Some(self.bounds)
+    }
+}
+
+pub enum BvhNode {
+    Leaf(AABB, Arc<DynTraceable>),
+    Split(AABB, Box<BvhNode>, Box<BvhNode>),
+}
+
+impl BvhNode {
+    pub fn new(objects: &[Arc<DynTraceable>]) -> BvhNode {
+        let axis = rand::thread_rng().gen_range(0, 3);
+
+        let compare = |a: &DynTraceable, b: &DynTraceable| {
+            a.bounding_box().unwrap().min[axis] < b.bounding_box().unwrap().min[axis]
+        };
+
+        match objects.len() {
+            0 => panic!("Cannot build BVH without any objects"),
+            1 => BvhNode::Leaf(objects[0].bounding_box().unwrap(), objects[0].clone()),
+            _ => {
+                let mut objects = objects.to_owned();
+                
+                objects.sort_unstable_by(|a, b| {
+                    if compare(a.deref(), b.deref()) { 
+                        Ordering::Less 
+                    } else { 
+                        Ordering::Greater 
+                    }
+                });
+
+                let mid   = objects.len() / 2;
+                let left  = BvhNode::new(&objects[..mid]);
+                let right = BvhNode::new(&objects[mid..]);
+
+                let bounds = AABB::surrounding_box(
+                    &left.bounding_box(),
+                    &right.bounding_box());
+
+                BvhNode::Split(bounds, Box::new(left), Box::new(right))
+            },
+        }
+    }
+    
+    pub fn bounding_box(&self) -> AABB {
+        match self {
+            BvhNode::Leaf(bounding_box, ..)  => *bounding_box,
+            BvhNode::Split(bounding_box, ..) => *bounding_box,
+        }
+    }
+
+    pub fn trace(&self, ray: &Ray, min_t: f32, mut max_t: f32) -> Option<HitRecord> {
+        if !self.bounding_box().hits_ray(ray, min_t, max_t) {
+            return None;
+        }
+
+        match self {
+            BvhNode::Leaf(bounding_box, traceable)    => traceable.trace(ray, min_t, max_t),
+            BvhNode::Split(bounding_box, left, right) => {
+                match left.trace(ray, min_t, max_t) {
+                    Some(record) => match right.trace(ray, min_t, record.t) {
+                        Some(record) => Some(record),
+                        None         => Some(record),
+                    },
+                    None => right.trace(ray, min_t, max_t),
+                }
+            },
+        }
     }
 }

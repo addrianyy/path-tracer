@@ -27,11 +27,13 @@ use std::time::Instant;
 use image::ImageBuffer;
 use rand::Rng;
 
+use material::Material;
+
 fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
     let mut current_attenuation = Vec3::fill(1.0);
     let mut current_ray = *ray;
 
-    const RECURSION_LIMIT: usize = 50;
+    const RECURSION_LIMIT: usize = 5;
     for _ in 0..RECURSION_LIMIT {
         if let Some(record) = scene.trace(&current_ray) {
             if let Some((attenuation, new_ray)) = record.material.scatter(&current_ray, &record) {
@@ -51,6 +53,7 @@ fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
     color * current_attenuation
 }
 
+
 fn load_scene(scene: &mut Scene) {
     let matte1 = material::create(Lambertian::new(Vec3::new(0.0, 0.2, 0.5)));
     let matte2 = material::create(Lambertian::new(Vec3::new(0.3, 0.0, 0.0)));
@@ -68,70 +71,124 @@ fn load_scene(scene: &mut Scene) {
     scene.create_object(Sphere::new(Vec3::new(10.0, 0.0, -10.0), 3.0, &metal2));
 }
 
+fn random_scene(scene: &mut Scene) {
+    scene.create_object(Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0, 
+        &Lambertian::new(Vec3::new(0.5, 0.5, 0.5)).build()));
+
+    let mut rng = rand::thread_rng();
+
+    let random_vec = |min: f32, max: f32| {
+        let mut rng = rand::thread_rng();
+        Vec3::new(
+            rng.gen_range(min, max),
+            rng.gen_range(min, max),
+            rng.gen_range(min, max))
+    };
+
+    for a in -11..11 {
+        for b in -11..11 {
+            let center = Vec3::new(
+                a as f32 + 0.9 * rng.gen::<f32>(), 
+                0.2,
+                b as f32 + 0.9 * rng.gen::<f32>()
+            );
+
+            if (center - Vec3::new(3.0, 0.2, 0.0)).length() > 0.9 {
+                let choose_mat: f32 = rng.gen();
+
+                let material = if choose_mat < 0.8 {
+                    let albedo = random_vec(0.0, 1.0) * random_vec(0.0, 1.0);
+                    Lambertian::new(albedo).build()
+                } else if choose_mat < 0.95 {
+                    let albedo = random_vec(0.5, 1.0);
+                    let fuzz   = rng.gen_range(0.0, 0.5);
+                    Metal::new(albedo, fuzz).build()
+                } else {
+                    Dielectric::new(1.5).build()
+                };
+
+                scene.create_object(Sphere::new(center, 0.2, &material));
+            }
+        }
+    }
+
+    scene.create_object(Sphere::new(Vec3::new(0.0, 1.0, 0.0), 1.0, 
+        &Dielectric::new(1.5).build()));
+
+    scene.create_object(Sphere::new(Vec3::new(-4.0, 1.0, 0.0), 1.0, 
+        &Lambertian::new(Vec3::new(0.4, 0.2, 0.1)).build()));
+
+    scene.create_object(Sphere::new(Vec3::new(4.0, 1.0, 0.0), 1.0, 
+        &Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0).build()));
+}
+
 fn main() {
-    let width:  usize = 1920;
-    let height: usize = 1080;
+    let width = 1920;
+    let height = 1080;
+    let num_samples_per_axis = 5;
 
     let camera = Camera::new(
-        Vec3::new(-2.0, 2.0, 1.0),
-        Vec3::new(0.0, 0.0, -1.0),
+        Vec3::new(12.0, 2.0, 3.0),
+        Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 1.0, 0.0),
-        90.0,
+        20.0,
         width as f32 / height as f32
     );
     
     let mut scene = Scene::new();
-    load_scene(&mut scene);
-    scene.build_uvh();
+
+    random_scene(&mut scene);
+    scene.build_bvh();
+
     let scene = Arc::new(scene);
 
     let thread_count      = num_cpus::get() * 8;
-    let lines_per_thread  = (height + thread_count - 1) / thread_count;
-    let pixels_per_thread = lines_per_thread * width;
+    let pixels_per_thread = (width * height + thread_count - 1) / thread_count;
 
     let mut threads = Vec::with_capacity(thread_count);
     
     println!("Using {} threads.", thread_count);
+
     let start_time = Instant::now();
 
-    for i in 0..thread_count {
-        let scene   = scene.clone();
-        let camera  = camera.clone();
-        let start_y = lines_per_thread * i;
+    for thread_index in 0..thread_count {
+        let scene       = scene.clone();
+        let camera      = camera.clone();
+        let start_pixel = pixels_per_thread * thread_index;
         
-        let pixels_outside_screen = if i + 1 == thread_count {
-            let rem = height % thread_count;
-            if  rem == 0 { 0 } else { thread_count - rem }
+        let pixels_outside_screen = if thread_index + 1 == thread_count {
+            (pixels_per_thread * thread_count).checked_sub(width * height).unwrap()
         } else {
             0
-        } * width;
+        };
 
-        let pixels_in_this_thread = pixels_per_thread - pixels_outside_screen;
+        let pixels_in_this_thread = pixels_per_thread.checked_sub(pixels_outside_screen).unwrap();
 
         threads.push(std::thread::spawn(move || {
             let mut pixels = Vec::with_capacity(pixels_in_this_thread);
-            let mut rng    = rand::thread_rng();
 
             for i in 0..pixels_in_this_thread {
-                let x = i % width;
-                let y = i / width + start_y;
+                let x = (i + start_pixel) % width;
+                let y = (i + start_pixel) / width;
 
-                let num_samples = 50;
                 let mut color_sum = Vec3::zero();
 
-                for _ in 0..num_samples {
-                    let x = x as f32 + (rng.gen::<f32>() * 2.0 - 1.0);
-                    let y = y as f32 + (rng.gen::<f32>() * 2.0 - 1.0);
+                for sx in 0..num_samples_per_axis {
+                    for sy in 0..num_samples_per_axis {
+                        let x = x as f32 + ((sx as f32 / (num_samples_per_axis - 1) as f32)); 
+                        let y = y as f32 + ((sy as f32 / (num_samples_per_axis - 1) as f32));
 
-                    let u = x / width as f32;
-                    let v = 1.0 - (y / height as f32);
+                        let u = x / width as f32;
+                        let v = 1.0 - (y / height as f32);
 
-                    let ray   = camera.get_ray(u, v);
-                    let color = trace_ray(&ray, &scene);
+                        let ray   = camera.get_ray(u, v);
+                        let color = trace_ray(&ray, &scene);
 
-                    color_sum += color;
+                        color_sum += color;
+                    }
                 }
 
+                let num_samples = num_samples_per_axis * num_samples_per_axis;
                 let color = color_sum / num_samples as f32;
                 let color = Vec3::new(color.x.sqrt(), color.y.sqrt(), color.z.sqrt());
 
@@ -145,7 +202,7 @@ fn main() {
     let pixels: Vec<_> = threads.into_iter().map(|x| x.join().unwrap()).collect();
     let pixel_count    = pixels.iter().fold(0, |acc, x| acc + x.len()); 
 
-    assert_eq!(pixel_count, width * height, "Unexprected number of generated pixels.");
+    assert_eq!(pixel_count, width * height, "Unexpected number of generated pixels.");
 
     let execution_time = Instant::now().duration_since(start_time);
     println!("Raytracing took {:.8} seconds.", execution_time.as_secs_f64());
@@ -156,8 +213,9 @@ fn main() {
         let x = x as usize;
         let y = y as usize;
 
-        let thread_index = y / lines_per_thread;
-        let index        = x + (y % lines_per_thread) * width;
+        let pixel_index  = x + y * width;
+        let thread_index = pixel_index / pixels_per_thread;
+        let index        = pixel_index % pixels_per_thread;
 
         let color = pixels[thread_index][index];
 

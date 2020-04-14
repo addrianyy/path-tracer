@@ -3,6 +3,8 @@ use crate::ray::Ray;
 use crate::aabb::AABB;
 use crate::material::Material;
 
+pub type DynTraceable = dyn TraceableObject + Send + Sync;
+
 pub struct HitRecord<'a> {
     pub t:        f32,
     pub point:    Vec3,

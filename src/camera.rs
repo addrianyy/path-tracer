@@ -30,8 +30,6 @@ impl Camera {
 
     pub fn get_ray(&self, u: f32, v: f32) -> Ray {
         let dir = (self.lower_left_corner + self.horizontal * u + self.vertical * v) - self.origin;
-        let ray = Ray::new(self.origin, dir);
-
-        ray
+        Ray::new(self.origin, dir)
     }
 }
