@@ -30,7 +30,7 @@ impl Scene {
                     closest_record   = Some(record);
                 }
             }
-                    
+            
             closest_record
         }
     }
@@ -41,7 +41,7 @@ impl Scene {
 
     pub fn construct_bvh(&mut self) {
         let mut objects: Vec<_> = self.objects.drain(..).map(Some).collect();
-        self.bvh_root = Some(BvhNode::new(&mut objects));
+        self.bvh_root = Some(BvhNode::new_better(&mut objects));
 
         println!("Constructed bounding volume hierarchy.");
     }

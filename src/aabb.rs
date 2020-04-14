@@ -16,14 +16,10 @@ impl AABB {
     }
 
     pub fn center(&self) -> Vec3 {
-        Vec3 {
-            x: self.min.x + (self.max.x - self.min.x) / 2.0,
-            y: self.min.y + (self.max.y - self.min.y) / 2.0,
-            z: self.min.z + (self.max.z - self.min.z) / 2.0,
-        }
+        (self.min + self.max) * 0.5 
     }
 
-    pub fn hits_ray(&self, ray: &Ray, min_t: f32, max_t: f32) -> bool {
+    pub fn intersect(&self, ray: &Ray, min_t: f32, max_t: f32) -> bool {
         let calc = |a, min_t, max_t| {
             let inv = 1.0 / ray.get_direction()[a];
             let t0  = (self.min[a] - ray.get_origin()[a]) * inv;

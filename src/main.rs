@@ -137,7 +137,7 @@ fn main() {
     
     let mut scene = Scene::new();
 
-    random_scene(&mut scene);
+    load_scene(&mut scene);
     scene.construct_bvh();
 
     let scene = Arc::new(scene);
@@ -200,7 +200,7 @@ fn main() {
     }
 
     let pixels: Vec<_> = threads.into_iter().map(|x| x.join().unwrap()).collect();
-    let pixel_count    = pixels.iter().fold(0, |acc, x| acc + x.len()); 
+    let pixel_count    = pixels.iter().fold(0, |acc, x| acc + x.len());
 
     assert_eq!(pixel_count, width * height, "Unexpected number of generated pixels.");
 
