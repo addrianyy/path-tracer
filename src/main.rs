@@ -137,7 +137,7 @@ fn main() {
     
     let mut scene = Scene::new();
 
-    load_scene(&mut scene);
+    random_scene(&mut scene);
     scene.construct_bvh();
 
     let scene = Arc::new(scene);

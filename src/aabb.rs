@@ -15,6 +15,10 @@ impl AABB {
         }
     }
 
+    pub fn extent(&self) -> Vec3 {
+        self.max - self.min
+    }
+
     pub fn center(&self) -> Vec3 {
         (self.min + self.max) * 0.5 
     }
