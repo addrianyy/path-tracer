@@ -1,4 +1,3 @@
-use crate::vec::Vec3;
 use crate::ray::Ray;
 use crate::aabb::AABB;
 use crate::traceable_object::{HitRecord, DynTraceable};

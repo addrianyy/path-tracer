@@ -11,12 +11,17 @@ mod math;
 mod dielectric;
 mod aabb;
 mod bvh;
+mod denoiser;
+mod timed_block;
+
+pub use timed_block::timed_block;
 
 use vec::Vec3;
 use ray::Ray;
 use scene::Scene;
 use sphere::Sphere;
 use camera::Camera;
+use material::Material;
 use metal::Metal;
 use lambertian::Lambertian;
 use dielectric::Dielectric;
@@ -26,8 +31,6 @@ use std::time::Instant;
 
 use image::ImageBuffer;
 use rand::Rng;
-
-use material::Material;
 
 fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
     let mut current_attenuation = Vec3::fill(1.0);
@@ -125,7 +128,7 @@ fn random_scene(scene: &mut Scene) {
 fn main() {
     let width = 1920;
     let height = 1080;
-    let num_samples_per_axis = 5;
+    let num_samples_per_axis = 6;
 
     let camera = Camera::new(
         Vec3::new(12.0, 2.0, 3.0),
@@ -143,82 +146,85 @@ fn main() {
     let scene = Arc::new(scene);
 
     let thread_count      = num_cpus::get() * 8;
-    let pixels_per_thread = (width * height + thread_count - 1) / thread_count;
+    let total_pixel_count = width * height;
+    let pixels_per_thread = (total_pixel_count + thread_count - 1) / thread_count;
 
-    let mut threads = Vec::with_capacity(thread_count);
-    
-    println!("Using {} threads.", thread_count);
+    let mut pixels = timed_block(&format!("Raytracing using {} threads", thread_count), || {
+        let mut threads = Vec::with_capacity(thread_count);
 
-    let start_time = Instant::now();
+        for thread_index in 0..thread_count {
+            let scene       = scene.clone();
+            let camera      = camera.clone();
+            let start_pixel = pixels_per_thread * thread_index;
+            
+            let pixels_outside_screen = if thread_index + 1 == thread_count {
+                (pixels_per_thread * thread_count).checked_sub(width * height).unwrap()
+            } else {
+                0
+            };
 
-    for thread_index in 0..thread_count {
-        let scene       = scene.clone();
-        let camera      = camera.clone();
-        let start_pixel = pixels_per_thread * thread_index;
-        
-        let pixels_outside_screen = if thread_index + 1 == thread_count {
-            (pixels_per_thread * thread_count).checked_sub(width * height).unwrap()
-        } else {
-            0
-        };
+            let pixels_in_this_thread = pixels_per_thread.checked_sub(pixels_outside_screen)
+                .unwrap();
 
-        let pixels_in_this_thread = pixels_per_thread.checked_sub(pixels_outside_screen).unwrap();
+            threads.push(std::thread::spawn(move || {
+                let mut pixels = Vec::with_capacity(pixels_in_this_thread);
 
-        threads.push(std::thread::spawn(move || {
-            let mut pixels = Vec::with_capacity(pixels_in_this_thread);
+                for i in 0..pixels_in_this_thread {
+                    let x = (i + start_pixel) % width;
+                    let y = (i + start_pixel) / width;
 
-            for i in 0..pixels_in_this_thread {
-                let x = (i + start_pixel) % width;
-                let y = (i + start_pixel) / width;
+                    let mut color_sum = Vec3::zero();
 
-                let mut color_sum = Vec3::zero();
+                    for sx in 0..num_samples_per_axis {
+                        for sy in 0..num_samples_per_axis {
+                            let x = x as f32 + (sx as f32 / (num_samples_per_axis - 1) as f32); 
+                            let y = y as f32 + (sy as f32 / (num_samples_per_axis - 1) as f32);
 
-                for sx in 0..num_samples_per_axis {
-                    for sy in 0..num_samples_per_axis {
-                        let x = x as f32 + (sx as f32 / (num_samples_per_axis - 1) as f32); 
-                        let y = y as f32 + (sy as f32 / (num_samples_per_axis - 1) as f32);
+                            let u = x / width as f32;
+                            let v = 1.0 - (y / height as f32);
 
-                        let u = x / width as f32;
-                        let v = 1.0 - (y / height as f32);
+                            let ray   = camera.get_ray(u, v);
+                            let color = trace_ray(&ray, &scene);
 
-                        let ray   = camera.get_ray(u, v);
-                        let color = trace_ray(&ray, &scene);
-
-                        color_sum += color;
+                            color_sum += color;
+                        }
                     }
+
+                    let num_samples = num_samples_per_axis * num_samples_per_axis;
+                    let color = color_sum / num_samples as f32;
+                    let color = Vec3::new(color.x.sqrt(), color.y.sqrt(), color.z.sqrt());
+
+                    pixels.push(color);
                 }
 
-                let num_samples = num_samples_per_axis * num_samples_per_axis;
-                let color = color_sum / num_samples as f32;
-                let color = Vec3::new(color.x.sqrt(), color.y.sqrt(), color.z.sqrt());
+                pixels
+            }));
+        }
 
-                pixels.push(color);
-            }
+        let pixels: Vec<_> = threads.into_iter()
+            .flat_map(|thread_pixels| thread_pixels.join().unwrap().into_iter())
+            .collect();
 
-            pixels
-        }));
-    }
+        pixels
+    });
 
-    let pixels: Vec<_> = threads.into_iter().map(|x| x.join().unwrap()).collect();
-    let pixel_count    = pixels.iter().fold(0, |acc, x| acc + x.len());
+    assert_eq!(pixels.len(), width * height, "Unexpected number of generated pixels.");
 
-    assert_eq!(pixel_count, width * height, "Unexpected number of generated pixels.");
+    timed_block("Denoising", || { 
+        denoiser::denoise(width as u32, height as u32, &mut pixels); 
+    });
 
-    let execution_time = Instant::now().duration_since(start_time);
-    println!("Raytracing took {:.8} seconds.", execution_time.as_secs_f64());
+    save_image("output.png", &pixels, width, height);
+}
 
+fn save_image(path: &str, pixels: &[Vec3], width: usize, height: usize) {
     let mut imgbuf = ImageBuffer::new(width as u32, height as u32);
-
+    
     for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
         let x = x as usize;
         let y = y as usize;
 
-        let pixel_index  = x + y * width;
-        let thread_index = pixel_index / pixels_per_thread;
-        let index        = pixel_index % pixels_per_thread;
-
-        let color = pixels[thread_index][index];
-
+        let color = pixels[x + y * width];
         let r = (color.x * 255.0) as u8;
         let g = (color.y * 255.0) as u8;
         let b = (color.z * 255.0) as u8;
@@ -226,5 +232,5 @@ fn main() {
         *pixel = image::Rgb([r, g, b]);
     }
 
-    imgbuf.save("output.png").expect("Failed to save output image.");
+    imgbuf.save(path).expect("Failed to save output image.");
 }

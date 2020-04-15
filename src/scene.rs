@@ -40,9 +40,9 @@ impl Scene {
     }
 
     pub fn construct_bvh(&mut self) {
-        let mut objects: Vec<_> = self.objects.drain(..).map(Some).collect();
-        self.bvh_root = Some(BvhNode::new(&mut objects));
-
-        println!("Constructed bounding volume hierarchy.");
+        crate::timed_block(&format!("Constructing BVH for {} objects", self.objects.len()), || {
+            let mut objects: Vec<_> = self.objects.drain(..).map(Some).collect();
+            self.bvh_root = Some(BvhNode::new(&mut objects));
+        });
     }
 }
