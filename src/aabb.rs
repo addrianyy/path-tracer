@@ -62,4 +62,8 @@ impl AABB {
         AABB::new(bbmin, bbmax)
     }
 
+    pub fn volume(&self) -> f32 {
+        let ex = self.extent();
+        (ex.x * ex.y * ex.z).abs()
+    }
 }

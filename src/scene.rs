@@ -41,8 +41,7 @@ impl Scene {
 
     pub fn construct_bvh(&mut self) {
         crate::timed_block(&format!("Constructing BVH for {} objects", self.objects.len()), || {
-            let mut objects: Vec<_> = self.objects.drain(..).map(Some).collect();
-            self.bvh_root = Some(BvhNode::new(&mut objects));
+            self.bvh_root = Some(BvhNode::new(std::mem::take(&mut self.objects)));
         });
     }
 }

@@ -101,7 +101,7 @@ pub fn denoise(width: u32, height: u32, pixels: &mut [Vec3]) {
         assert_eq!(rtVariableSetObject(vinput_buffer, input_buffer), 0);
         assert_eq!(rtVariableSetObject(voutput_buffer, output_buffer), 0);
         assert_eq!(rtVariableSet1f(vblend, 0.0), 0);
-        assert_eq!(rtVariableSet1ui(vhdr, 1), 0);
+        assert_eq!(rtVariableSet1ui(vhdr, 0), 0);
 
         let mut command_list = 0;
         assert_eq!(rtCommandListCreate(context, &mut command_list), 0);

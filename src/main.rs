@@ -27,7 +27,6 @@ use lambertian::Lambertian;
 use dielectric::Dielectric;
 
 use std::sync::Arc;
-use std::time::Instant;
 
 use image::ImageBuffer;
 use rand::Rng;
@@ -75,7 +74,7 @@ fn load_scene(scene: &mut Scene) {
 }
 
 fn random_scene(scene: &mut Scene) {
-    scene.create_object(Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0, 
+    scene.create_object(Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0,
         &Lambertian::new(Vec3::new(0.5, 0.5, 0.5)).create()));
 
     let mut rng = rand::thread_rng();
@@ -88,10 +87,10 @@ fn random_scene(scene: &mut Scene) {
             rng.gen_range(min, max))
     };
 
-    for a in -11..11 {
-        for b in -11..11 {
+    for a in -22..22 {
+        for b in -22..221 {
             let center = Vec3::new(
-                a as f32 + 0.9 * rng.gen::<f32>(), 
+                a as f32 + 0.9 * rng.gen::<f32>(),
                 0.2,
                 b as f32 + 0.9 * rng.gen::<f32>()
             );
@@ -115,13 +114,13 @@ fn random_scene(scene: &mut Scene) {
         }
     }
 
-    scene.create_object(Sphere::new(Vec3::new(0.0, 1.0, 0.0), 1.0, 
+    scene.create_object(Sphere::new(Vec3::new(0.0, 1.0, 0.0), 1.0,
         &Dielectric::new(1.5).create()));
 
-    scene.create_object(Sphere::new(Vec3::new(-4.0, 1.0, 0.0), 1.0, 
+    scene.create_object(Sphere::new(Vec3::new(-4.0, 1.0, 0.0), 1.0,
         &Lambertian::new(Vec3::new(0.4, 0.2, 0.1)).create()));
 
-    scene.create_object(Sphere::new(Vec3::new(4.0, 1.0, 0.0), 1.0, 
+    scene.create_object(Sphere::new(Vec3::new(4.0, 1.0, 0.0), 1.0,
         &Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0).create()));
 }
 
@@ -137,10 +136,11 @@ fn main() {
         20.0,
         width as f32 / height as f32
     );
-    
+
     let mut scene = Scene::new();
 
-    random_scene(&mut scene);
+    load_scene(&mut scene);
+    //random_scene(&mut scene);
     scene.construct_bvh();
 
     let scene = Arc::new(scene);
@@ -156,7 +156,7 @@ fn main() {
             let scene       = scene.clone();
             let camera      = camera.clone();
             let start_pixel = pixels_per_thread * thread_index;
-            
+
             let pixels_outside_screen = if thread_index + 1 == thread_count {
                 (pixels_per_thread * thread_count).checked_sub(width * height).unwrap()
             } else {
@@ -177,7 +177,7 @@ fn main() {
 
                     for sx in 0..num_samples_per_axis {
                         for sy in 0..num_samples_per_axis {
-                            let x = x as f32 + (sx as f32 / (num_samples_per_axis - 1) as f32); 
+                            let x = x as f32 + (sx as f32 / (num_samples_per_axis - 1) as f32);
                             let y = y as f32 + (sy as f32 / (num_samples_per_axis - 1) as f32);
 
                             let u = x / width as f32;
@@ -210,8 +210,8 @@ fn main() {
 
     assert_eq!(pixels.len(), width * height, "Unexpected number of generated pixels.");
 
-    timed_block("Denoising", || { 
-        denoiser::denoise(width as u32, height as u32, &mut pixels); 
+    timed_block("Denoising", || {
+        denoiser::denoise(width as u32, height as u32, &mut pixels);
     });
 
     save_image("output.png", &pixels, width, height);
@@ -219,7 +219,7 @@ fn main() {
 
 fn save_image(path: &str, pixels: &[Vec3], width: usize, height: usize) {
     let mut imgbuf = ImageBuffer::new(width as u32, height as u32);
-    
+
     for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
         let x = x as usize;
         let y = y as usize;
