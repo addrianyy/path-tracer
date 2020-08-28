@@ -11,7 +11,6 @@ mod math;
 mod dielectric;
 mod aabb;
 mod bvh;
-mod denoiser;
 mod timed_block;
 
 pub use timed_block::timed_block;
@@ -27,6 +26,10 @@ use lambertian::Lambertian;
 use dielectric::Dielectric;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
+use std::io::{self, Write};
+use std::thread;
 
 use image::ImageBuffer;
 use rand::Rng;
@@ -36,6 +39,7 @@ fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
     let mut current_ray = *ray;
 
     const RECURSION_LIMIT: usize = 5;
+
     for _ in 0..RECURSION_LIMIT {
         if let Some(record) = scene.trace(&current_ray) {
             if let Some((attenuation, new_ray)) = record.material.scatter(&current_ray, &record) {
@@ -124,10 +128,43 @@ fn random_scene(scene: &mut Scene) {
         &Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0).create()));
 }
 
+struct WorkQueue<T: Copy> {
+    queue: Vec<T>,
+    index: AtomicUsize,
+}
+
+impl<T: Copy> WorkQueue<T> {
+    pub fn new(queue: Vec<T>) -> Self {
+        Self {
+            queue,
+            index: AtomicUsize::new(0),
+        }
+    }
+
+    pub fn take(&self) -> Option<T> {
+        let index = self.index.fetch_add(1, Ordering::SeqCst);
+
+        if index < self.queue.len() {
+            Some(self.queue[index])
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+struct PixelRange {
+    start: usize,
+    size:  usize,
+}
+
 fn main() {
-    let width = 1920;
-    let height = 1080;
-    let num_samples_per_axis = 6;
+    const RANGES_PER_THREAD: usize = 64;
+    const PROGRESS_STEP:     usize = 8192 * 2;
+
+    let width  = 3840;
+    let height = 2160;
+    let samples_per_axis = 16;
 
     let camera = Camera::new(
         Vec3::new(12.0, 2.0, 3.0),
@@ -143,42 +180,68 @@ fn main() {
     //random_scene(&mut scene);
     scene.construct_bvh();
 
-    let scene = Arc::new(scene);
+    let scene       = Arc::new(scene);
+    let pixels_done = Arc::new(AtomicUsize::new(0));
 
-    let thread_count      = num_cpus::get() * 8;
+    let thread_count      = num_cpus::get();
     let total_pixel_count = width * height;
-    let pixels_per_thread = (total_pixel_count + thread_count - 1) / thread_count;
 
-    let mut pixels = timed_block(&format!("Raytracing using {} threads", thread_count), || {
-        let mut threads = Vec::with_capacity(thread_count);
+    let queue = {
+        let range_count      = thread_count * RANGES_PER_THREAD;
+        let pixels_per_range = (total_pixel_count + range_count - 1) / range_count;
 
-        for thread_index in 0..thread_count {
-            let scene       = scene.clone();
-            let camera      = camera.clone();
-            let start_pixel = pixels_per_thread * thread_index;
+        let mut ranges = Vec::with_capacity(range_count);
 
-            let pixels_outside_screen = if thread_index + 1 == thread_count {
-                (pixels_per_thread * thread_count).checked_sub(width * height).unwrap()
+        for i in 0..range_count {
+            let start = i * pixels_per_range;
+
+            let outside_screen = if i + 1 == range_count {
+                (pixels_per_range * range_count).checked_sub(total_pixel_count).unwrap()
             } else {
                 0
             };
 
-            let pixels_in_this_thread = pixels_per_thread.checked_sub(pixels_outside_screen)
-                .unwrap();
+            let size = pixels_per_range.checked_sub(outside_screen).unwrap();
 
-            threads.push(std::thread::spawn(move || {
-                let mut pixels = Vec::with_capacity(pixels_in_this_thread);
+            ranges.push(PixelRange {
+                start,
+                size,
+            });
+        }
 
-                for i in 0..pixels_in_this_thread {
+        Arc::new(WorkQueue::new(ranges))
+    };
+
+    println!("Raytracing using {} threads...\n", thread_count);
+
+    let mut threads = Vec::with_capacity(thread_count);
+    let start_time  = Instant::now();
+
+    for _ in 0..thread_count {
+        let scene       = scene.clone();
+        let camera      = camera.clone();
+        let queue       = queue.clone();
+        let pixels_done = pixels_done.clone();
+
+        threads.push(thread::spawn(move || {
+            let mut results = Vec::with_capacity(RANGES_PER_THREAD);
+
+            while let Some(range) = queue.take() {
+                let pixel_count = range.size;
+                let start_pixel = range.start;
+
+                let mut pixels = Vec::with_capacity(pixel_count);
+
+                for i in 0..pixel_count {
                     let x = (i + start_pixel) % width;
                     let y = (i + start_pixel) / width;
 
                     let mut color_sum = Vec3::zero();
 
-                    for sx in 0..num_samples_per_axis {
-                        for sy in 0..num_samples_per_axis {
-                            let x = x as f32 + (sx as f32 / (num_samples_per_axis - 1) as f32);
-                            let y = y as f32 + (sy as f32 / (num_samples_per_axis - 1) as f32);
+                    for sx in 0..samples_per_axis {
+                        for sy in 0..samples_per_axis {
+                            let x = x as f32 + (sx as f32 / (samples_per_axis - 1) as f32);
+                            let y = y as f32 + (sy as f32 / (samples_per_axis - 1) as f32);
 
                             let u = x / width as f32;
                             let v = 1.0 - (y / height as f32);
@@ -190,29 +253,71 @@ fn main() {
                         }
                     }
 
-                    let num_samples = num_samples_per_axis * num_samples_per_axis;
-                    let color = color_sum / num_samples as f32;
+                    if i > 0 {
+                        if i % PROGRESS_STEP == 0 {
+                            pixels_done.fetch_add(PROGRESS_STEP, Ordering::Relaxed);
+                        } else if i == pixel_count - 1 {
+                            pixels_done.fetch_add(pixel_count % PROGRESS_STEP,
+                                                  Ordering::Relaxed);
+                        }
+                    }
+
+                    let samples = samples_per_axis * samples_per_axis;
+
+                    let color = color_sum / samples as f32;
                     let color = Vec3::new(color.x.sqrt(), color.y.sqrt(), color.z.sqrt());
 
                     pixels.push(color);
                 }
 
-                pixels
-            }));
+                results.push((start_pixel, pixels));
+            }
+
+            results
+        }));
+    }
+
+    loop {
+        let pixels_done = pixels_done.load(Ordering::Relaxed);
+        let progress    = pixels_done as f64 / total_pixel_count as f64;
+
+        let elapsed = start_time.elapsed().as_secs_f64();
+
+        let max_bars = 50;
+        let bars     = (progress * max_bars as f64) as u64;
+
+        print!("\r  [");
+
+        for i in 0..max_bars {
+            if i < bars {
+                print!("=");
+            } else {
+                print!("-");
+            }
         }
 
-        let pixels: Vec<_> = threads.into_iter()
-            .flat_map(|thread_pixels| thread_pixels.join().unwrap().into_iter())
-            .collect();
+        let progress_per_second = progress / elapsed;
+        let left                = (1.0 - progress) / progress_per_second;
 
-        pixels
-    });
+        print!("] {:.1}% | {:.3}s elapsed | {:.1}s left", progress * 100.0, elapsed, left);
 
-    assert_eq!(pixels.len(), width * height, "Unexpected number of generated pixels.");
+        io::stdout().flush().unwrap();
 
-    timed_block("Denoising", || {
-        denoiser::denoise(width as u32, height as u32, &mut pixels);
-    });
+        if pixels_done == total_pixel_count {
+            println!();
+            break;
+        }
+
+        thread::sleep(Duration::from_millis(100));
+    }
+
+    let mut pixels = vec![Vec3::zero(); total_pixel_count];
+
+    for thread in threads {
+        for (start_pixel, buffer) in thread.join().unwrap() {
+            pixels[start_pixel..][..buffer.len()].copy_from_slice(&buffer);
+        }
+    }
 
     save_image("output.png", &pixels, width, height);
 }
