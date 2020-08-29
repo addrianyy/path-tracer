@@ -1,6 +1,6 @@
-use crate::ray::Ray;
-use crate::aabb::AABB;
-use crate::traceable_object::{HitRecord, DynTraceable};
+use crate::Ray;
+use crate::math::AABB;
+use crate::traceable::{HitRecord, DynTraceable};
 
 use std::cmp::Ordering;
 

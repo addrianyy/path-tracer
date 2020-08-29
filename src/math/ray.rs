@@ -1,9 +1,9 @@
-use crate::vec::Vec3;
+use super::Vec3;
 
 #[derive(Copy, Clone)]
 pub struct Ray {
-    origin:    Vec3,
-    direction: Vec3,
+    pub origin:    Vec3,
+    pub direction: Vec3,
 }
 
 impl Ray {
@@ -14,15 +14,7 @@ impl Ray {
         }
     }
 
-    pub fn get_point(&self, t: f32) -> Vec3 {
+    pub fn point(&self, t: f32) -> Vec3 {
         self.origin + self.direction * t
-    }
-
-    pub fn get_origin(&self) -> Vec3 {
-        self.origin
-    }
-
-    pub fn get_direction(&self) -> Vec3 {
-        self.direction
     }
 }

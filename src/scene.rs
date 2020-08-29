@@ -1,5 +1,5 @@
-use crate::ray::Ray;
-use crate::traceable_object::{HitRecord, TraceableObject, DynTraceable};
+use crate::Ray;
+use crate::traceable::{HitRecord, Traceable, DynTraceable};
 use crate::bvh::BvhNode;
 
 use std::time::Instant;
@@ -38,7 +38,7 @@ impl Scene {
         }
     }
 
-    pub fn add(&mut self, object: impl TraceableObject + Send + Sync + 'static) {
+    pub fn add(&mut self, object: impl Traceable + Send + Sync + 'static) {
         self.objects.push(Box::new(object));
     }
 

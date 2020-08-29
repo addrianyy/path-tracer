@@ -1,9 +1,12 @@
-use crate::vec::Vec3;
-use crate::ray::Ray;
-use crate::aabb::AABB;
+mod sphere;
+
+use crate::{Vec3, Ray};
+use crate::math::AABB;
 use crate::material::Material;
 
-pub type DynTraceable = dyn TraceableObject + Send + Sync;
+pub use sphere::Sphere;
+
+pub type DynTraceable = dyn Traceable + Send + Sync;
 
 pub struct HitRecord<'a> {
     pub t:        f32,
@@ -23,7 +26,7 @@ impl<'a> HitRecord<'a> {
     }
 }
 
-pub trait TraceableObject {
+pub trait Traceable {
     fn trace(&self, ray: &Ray, min_t: f32, max_t: f32) -> Option<HitRecord>; 
     fn bounding_box(&self) -> Option<AABB>;
 }

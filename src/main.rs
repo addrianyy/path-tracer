@@ -1,27 +1,18 @@
-mod vec;
-mod ray;
-mod traceable_object;
-mod scene;
-mod sphere;
-mod camera;
+mod traceable;
 mod material;
-mod lambertian;
-mod metal;
 mod math;
-mod dielectric;
-mod aabb;
+
+mod scene;
+mod camera;
 mod bvh;
 mod pin;
 
-use vec::Vec3;
-use ray::Ray;
+pub use math::{Vec3, Ray};
+
 use scene::Scene;
-use sphere::Sphere;
 use camera::Camera;
-use material::Material;
-use metal::Metal;
-use lambertian::Lambertian;
-use dielectric::Dielectric;
+use traceable::Sphere;
+use material::{Metal, Lambertian, Dielectric};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -51,7 +42,7 @@ fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
         }
     }
 
-    let t = 0.5 * (ray.get_direction().y + 1.0);
+    let t = 0.5 * (ray.direction.y + 1.0);
     let color = Vec3::new(1.0, 1.0, 1.0) * (1.0 - t) + Vec3::new(0.5, 0.7, 1.0) * t;
 
     color * current_attenuation
@@ -59,25 +50,25 @@ fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
 
 
 fn load_scene(scene: &mut Scene) {
-    let matte1 = Lambertian::new(Vec3::new(0.0, 0.2, 0.5)).create();
-    let matte2 = Lambertian::new(Vec3::new(0.3, 0.0, 0.0)).create();
+    let matte1 = Lambertian::new(Vec3::new(0.0, 0.2, 0.5));
+    let matte2 = Lambertian::new(Vec3::new(0.3, 0.0, 0.0));
     scene.add(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5, &matte1));
     scene.add(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0, &matte2));
 
-    let metal1 = Metal::new(Vec3::new(0.8, 0.6, 0.2), 0.0).create();
-    let glass1 = Dielectric::new(1.8).create();
-    let glass2 = Dielectric::new(0.4).create();
+    let metal1 = Metal::new(Vec3::new(0.8, 0.6, 0.2), 0.0);
+    let glass1 = Dielectric::new(1.8);
+    let glass2 = Dielectric::new(0.4);
     scene.add(Sphere::new(Vec3::new( 1.5, 0.0, -2.0), 0.5, &metal1));
     scene.add(Sphere::new(Vec3::new(-1.5, 0.0, -2.0), 0.5, &glass1));
     scene.add(Sphere::new(Vec3::new( 3.5, 0.0, -2.0), 0.8, &glass2));
 
-    let metal2 = Metal::new(Vec3::new(0.1, 1.0, 0.7), 0.1).create();
+    let metal2 = Metal::new(Vec3::new(0.1, 1.0, 0.7), 0.1);
     scene.add(Sphere::new(Vec3::new(10.0, 0.0, -10.0), 3.0, &metal2));
 }
 
 fn random_scene(scene: &mut Scene) {
     scene.add(Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0,
-        &Lambertian::new(Vec3::new(0.5, 0.5, 0.5)).create()));
+        &Lambertian::new(Vec3::new(0.5, 0.5, 0.5))));
 
     let mut rng = rand::thread_rng();
 
@@ -102,13 +93,13 @@ fn random_scene(scene: &mut Scene) {
 
                 let material = if choose_mat < 0.8 {
                     let albedo = random_vec(0.0, 1.0) * random_vec(0.0, 1.0);
-                    Lambertian::new(albedo).create()
+                    Lambertian::new(albedo)
                 } else if choose_mat < 0.95 {
                     let albedo = random_vec(0.5, 1.0);
                     let fuzz   = rng.gen_range(0.0, 0.5);
-                    Metal::new(albedo, fuzz).create()
+                    Metal::new(albedo, fuzz)
                 } else {
-                    Dielectric::new(1.5).create()
+                    Dielectric::new(1.5)
                 };
 
                 scene.add(Sphere::new(center, 0.2, &material));
@@ -117,13 +108,13 @@ fn random_scene(scene: &mut Scene) {
     }
 
     scene.add(Sphere::new(Vec3::new(0.0, 1.0, 0.0), 1.0,
-        &Dielectric::new(1.5).create()));
+        &Dielectric::new(1.5)));
 
     scene.add(Sphere::new(Vec3::new(-4.0, 1.0, 0.0), 1.0,
-        &Lambertian::new(Vec3::new(0.4, 0.2, 0.1)).create()));
+        &Lambertian::new(Vec3::new(0.4, 0.2, 0.1))));
 
     scene.add(Sphere::new(Vec3::new(4.0, 1.0, 0.0), 1.0,
-        &Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0).create()));
+        &Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0)));
 }
 
 struct WorkQueue<T: Copy> {
@@ -247,7 +238,7 @@ fn main() {
                             let u = x / width as f32;
                             let v = 1.0 - (y / height as f32);
 
-                            let ray   = camera.get_ray(u, v);
+                            let ray   = camera.ray(u, v);
                             let color = trace_ray(&ray, &scene);
 
                             color_sum += color;
