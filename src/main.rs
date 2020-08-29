@@ -17,17 +17,20 @@ use material::{Metal, Lambertian, Dielectric};
 use texture::PictureTexture;
 use threading::{PixelRange, PixelQueue};
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use std::io::{self, Write};
-use std::thread;
 use std::sync::mpsc;
+use std::sync::Arc;
+use std::thread;
 
+use minifb::{Window, WindowOptions};
 use image::RgbImage;
 use rand::Rng;
 
 const RANGES_PER_THREAD: usize = 64;
+const CHANNELS:          usize = 3;
+const PROGRESS_STEP:     usize = 8192;
 
 struct State {
     scene:       Scene,
@@ -183,12 +186,57 @@ fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
     color * current_attenuation
 }
 
-fn main() {
-    const PROGRESS_STEP: usize = 8192;
-    const CHANNELS:      usize = 3;
+struct Pixels {
+    pixels:     Vec<u8>,
+    fb_pixels:  Option<Vec<u32>>,
+    width:      usize,
+    height:     usize,
+}
 
-    let width  = 3840;
-    let height = 2160;
+impl Pixels {
+    pub fn new(width: usize, height: usize, window: bool) -> Self {
+        let pixel_count = width * height;
+
+        let fb_pixels = if window {
+            Some(vec![0; pixel_count])
+        } else {
+            None
+        };
+
+        Self {
+            pixels: vec![0; pixel_count * CHANNELS],
+            fb_pixels,
+            width,
+            height,
+        }
+    }
+
+    pub fn add_fragment(&mut self, (start_pixel, buffer): (usize, Vec<u8>)) {
+        self.pixels[start_pixel * CHANNELS..][..buffer.len()].copy_from_slice(&buffer);
+
+        if let Some(fb_pixels) = self.fb_pixels.as_mut() {
+            for (offset, chunk) in buffer.chunks(3).enumerate() {
+                fb_pixels[start_pixel + offset] =
+                    u32::from_be_bytes([0, chunk[0], chunk[1], chunk[2]]);
+            }
+        }
+    }
+
+    pub fn update_window_framebuffer(&mut self, window: &mut Window) {
+        let framebuffer = &self.fb_pixels.as_ref().unwrap();
+
+        window.update_with_buffer(framebuffer, self.width, self.height)
+            .expect("Failed to update window framebuffer.");
+    }
+
+    pub fn disable_window(&mut self) {
+        self.fb_pixels = None;
+    }
+}
+
+fn main() {
+    let width  = 3840 - 200;
+    let height = 2160 - 200;
     let samples_per_axis = 16;
 
     let camera = Camera::new(
@@ -198,6 +246,8 @@ fn main() {
         20.0,
         width as f32 / height as f32,
     );
+
+    let preview_window = std::env::args().nth(1) == Some("preview".to_string());
 
     let mut scene = Scene::new();
 
@@ -212,10 +262,16 @@ fn main() {
     let (sender, receiver) = mpsc::channel();
     let state              = Arc::new(State::new(scene, camera, total_pixel_count, core_count));
 
-    println!("Raytracing using {} threads...\n", core_count);
+    println!("Raytracing using {} threads...", core_count);
 
     let mut threads = Vec::with_capacity(core_count);
     let start_time  = Instant::now();
+
+    let mut window = if preview_window {
+        Some(Window::new("path-tracer", width, height, WindowOptions::default()).unwrap())
+    } else {
+        None
+    };
 
     for core in 0..core_count {
         let state  = state.clone();
@@ -279,15 +335,11 @@ fn main() {
 
     drop(sender);
 
-    let mut pixels = vec![0; total_pixel_count * CHANNELS];
-
-    let copy_fragment = |pixels: &mut [u8], (start_pixel, buffer): (usize, Vec<u8>)| {
-        pixels[start_pixel * CHANNELS..][..buffer.len()].copy_from_slice(&buffer);
-    };
+    let mut pixels = Pixels::new(width, height, window.is_some());
 
     loop {
         while let Ok(fragment) = receiver.try_recv() {
-            copy_fragment(&mut pixels, fragment);
+            pixels.add_fragment(fragment);
         }
 
         let pixels_done = state.pixels_done.load(Ordering::Relaxed);
@@ -318,24 +370,37 @@ fn main() {
             break;
         }
 
+        if let Some(wnd) = window.as_mut() {
+            pixels.update_window_framebuffer(wnd);
+
+            if !wnd.is_open() {
+                window = None;
+                pixels.disable_window();
+            }
+        }
+
         io::stdout().flush().unwrap();
         thread::sleep(Duration::from_millis(100));
     }
 
     for fragment in receiver {
-        copy_fragment(&mut pixels, fragment);
+        pixels.add_fragment(fragment);
     }
+
+    RgbImage::from_raw(width as u32, height as u32, std::mem::take(&mut pixels.pixels))
+        .expect("Failed to create image buffer for the PNG.")
+        .save("output.png")
+        .expect("Failed to save output image.");
 
     for thread in threads {
         thread.join().unwrap();
     }
 
-    save_image("output.png", pixels, width, height);
-}
+    if let Some(wnd) = window.as_mut() {
+        pixels.update_window_framebuffer(wnd);
 
-fn save_image(path: &str, pixels: Vec<u8>, width: usize, height: usize) {
-    let imgbuf = RgbImage::from_raw(width as u32, height as u32, pixels)
-        .expect("Failed to create image buffer for the PNG.");
-
-    imgbuf.save(path).expect("Failed to save output image.");
+        while wnd.is_open() {
+            wnd.update();
+        }
+    }
 }
