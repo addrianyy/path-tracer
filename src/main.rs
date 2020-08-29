@@ -1,11 +1,12 @@
 mod traceable;
 mod material;
+mod texture;
 mod math;
 
+mod bvh;
 mod scene;
 mod camera;
-mod bvh;
-mod pin;
+mod threading;
 
 pub use math::{Vec3, Ray};
 
@@ -13,6 +14,8 @@ use scene::Scene;
 use camera::Camera;
 use traceable::Sphere;
 use material::{Metal, Lambertian, Dielectric};
+use texture::PictureTexture;
+use threading::{PixelRange, PixelQueue};
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -23,35 +26,56 @@ use std::thread;
 use image::ImageBuffer;
 use rand::Rng;
 
-fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
-    let mut current_attenuation = Vec3::fill(1.0);
-    let mut current_ray = *ray;
+const RANGES_PER_THREAD: usize = 64;
 
-    const RECURSION_LIMIT: usize = 5;
-
-    for _ in 0..RECURSION_LIMIT {
-        if let Some(record) = scene.trace(&current_ray) {
-            if let Some((attenuation, new_ray)) = record.material.scatter(&current_ray, &record) {
-                current_ray = new_ray;
-                current_attenuation *= attenuation;
-            } else {
-                return Vec3::fill(0.0);
-            }
-        } else {
-            break;
-        }
-    }
-
-    let t = 0.5 * (ray.direction.y + 1.0);
-    let color = Vec3::new(1.0, 1.0, 1.0) * (1.0 - t) + Vec3::new(0.5, 0.7, 1.0) * t;
-
-    color * current_attenuation
+struct State {
+    scene:       Scene,
+    camera:      Camera,
+    queue:       PixelQueue,
+    pixels_done: AtomicUsize,
 }
 
+impl State {
+    fn new(scene: Scene, camera: Camera, pixel_count: usize, threads: usize) -> Self {
+        let queue = {
+            let range_count      = threads * RANGES_PER_THREAD;
+            let pixels_per_range = (pixel_count + range_count - 1) / range_count;
+
+            let mut ranges = Vec::with_capacity(range_count);
+
+            for i in 0..range_count {
+                let start = i * pixels_per_range;
+
+                let outside_screen = if i + 1 == range_count {
+                    (pixels_per_range * range_count).checked_sub(pixel_count).unwrap()
+                } else {
+                    0
+                };
+
+                let size = pixels_per_range.checked_sub(outside_screen).unwrap();
+
+                ranges.push(PixelRange {
+                    start,
+                    size,
+                });
+            }
+
+            PixelQueue::new(ranges)
+        };
+
+        Self {
+            scene,
+            camera,
+            queue,
+            pixels_done: AtomicUsize::new(0),
+        }
+    }
+}
 
 fn load_scene(scene: &mut Scene) {
-    let matte1 = Lambertian::new(Vec3::new(0.0, 0.2, 0.5));
-    let matte2 = Lambertian::new(Vec3::new(0.3, 0.0, 0.0));
+    //let matte1 = Lambertian::new_solid(Vec3::new(0.0, 0.2, 0.5));
+    let matte1 = Lambertian::new(PictureTexture::new("earthmap.jpg"));
+    let matte2 = Lambertian::new_solid(Vec3::new(0.3, 0.0, 0.0));
     scene.add(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5, &matte1));
     scene.add(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0, &matte2));
 
@@ -67,17 +91,22 @@ fn load_scene(scene: &mut Scene) {
 }
 
 fn random_scene(scene: &mut Scene) {
-    scene.add(Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0,
-        &Lambertian::new(Vec3::new(0.5, 0.5, 0.5))));
+    scene.add(Sphere::new(
+        Vec3::new(0.0, -1000.0, 0.0),
+        1000.0,
+        &Lambertian::new_solid(Vec3::new(0.5, 0.5, 0.5)),
+    ));
 
     let mut rng = rand::thread_rng();
 
     let random_vec = |min: f32, max: f32| {
         let mut rng = rand::thread_rng();
+
         Vec3::new(
             rng.gen_range(min, max),
             rng.gen_range(min, max),
-            rng.gen_range(min, max))
+            rng.gen_range(min, max),
+        )
     };
 
     for a in -22..22 {
@@ -85,7 +114,7 @@ fn random_scene(scene: &mut Scene) {
             let center = Vec3::new(
                 a as f32 + 0.9 * rng.gen::<f32>(),
                 0.2,
-                b as f32 + 0.9 * rng.gen::<f32>()
+                b as f32 + 0.9 * rng.gen::<f32>(),
             );
 
             if (center - Vec3::new(3.0, 0.2, 0.0)).length() > 0.9 {
@@ -93,10 +122,12 @@ fn random_scene(scene: &mut Scene) {
 
                 let material = if choose_mat < 0.8 {
                     let albedo = random_vec(0.0, 1.0) * random_vec(0.0, 1.0);
-                    Lambertian::new(albedo)
+
+                    Lambertian::new_solid(albedo)
                 } else if choose_mat < 0.95 {
                     let albedo = random_vec(0.5, 1.0);
                     let fuzz   = rng.gen_range(0.0, 0.5);
+
                     Metal::new(albedo, fuzz)
                 } else {
                     Dielectric::new(1.5)
@@ -107,53 +138,57 @@ fn random_scene(scene: &mut Scene) {
         }
     }
 
-    scene.add(Sphere::new(Vec3::new(0.0, 1.0, 0.0), 1.0,
-        &Dielectric::new(1.5)));
+    scene.add(Sphere::new(
+        Vec3::new(0.0, 1.0, 0.0),
+        1.0,
+        &Dielectric::new(1.5),
+    ));
 
-    scene.add(Sphere::new(Vec3::new(-4.0, 1.0, 0.0), 1.0,
-        &Lambertian::new(Vec3::new(0.4, 0.2, 0.1))));
+    scene.add(Sphere::new(
+        Vec3::new(-4.0, 1.0, 0.0),
+        1.0, 
+        &Lambertian::new_solid(Vec3::new(0.4, 0.2, 0.1)),
+    ));
 
-    scene.add(Sphere::new(Vec3::new(4.0, 1.0, 0.0), 1.0,
-        &Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0)));
+    scene.add(Sphere::new(
+        Vec3::new(4.0, 1.0, 0.0),
+        1.0,
+        &Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0),
+    ));
 }
 
-struct WorkQueue<T: Copy> {
-    queue: Vec<T>,
-    index: AtomicUsize,
-}
+fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
+    let mut current_attenuation = Vec3::fill(1.0);
+    let mut current_ray         = *ray;
 
-impl<T: Copy> WorkQueue<T> {
-    pub fn new(queue: Vec<T>) -> Self {
-        Self {
-            queue,
-            index: AtomicUsize::new(0),
-        }
-    }
+    const MAX_TRACES: usize = 5;
 
-    pub fn take(&self) -> Option<T> {
-        let index = self.index.fetch_add(1, Ordering::SeqCst);
-
-        if index < self.queue.len() {
-            Some(self.queue[index])
+    for _ in 0..MAX_TRACES {
+        if let Some(record) = scene.trace(&current_ray) {
+            if let Some((attenuation, new_ray)) = record.material.scatter(&current_ray, &record) {
+                current_attenuation *= attenuation;
+                current_ray          = new_ray;
+            } else {
+                return Vec3::fill(0.0);
+            }
         } else {
-            None
+            break;
         }
     }
+
+    let t     = 0.5 * (ray.direction.y + 1.0);
+    let color = Vec3::new(1.0, 1.0, 1.0) * (1.0 - t) + Vec3::new(0.5, 0.7, 1.0) * t;
+
+    color * current_attenuation
 }
 
-#[derive(Copy, Clone)]
-struct PixelRange {
-    start: usize,
-    size:  usize,
-}
 
 fn main() {
-    const RANGES_PER_THREAD: usize = 64;
-    const PROGRESS_STEP:     usize = 8192;
+    const PROGRESS_STEP: usize = 8192;
 
     let width  = 3840;
     let height = 2160;
-    let samples_per_axis = 64;
+    let samples_per_axis = 16;
 
     let camera = Camera::new(
         Vec3::new(12.0, 2.0, 3.0),
@@ -165,42 +200,15 @@ fn main() {
 
     let mut scene = Scene::new();
 
-    //load_scene(&mut scene);
-    random_scene(&mut scene);
+    load_scene(&mut scene);
+    //random_scene(&mut scene);
 
     scene.construct_bvh();
 
-    let scene       = Arc::new(scene);
-    let pixels_done = Arc::new(AtomicUsize::new(0));
-
-    let core_count        = num_cpus::get();
+    let core_count        = threading::core_count();
     let total_pixel_count = width * height;
 
-    let queue = {
-        let range_count      = core_count * RANGES_PER_THREAD;
-        let pixels_per_range = (total_pixel_count + range_count - 1) / range_count;
-
-        let mut ranges = Vec::with_capacity(range_count);
-
-        for i in 0..range_count {
-            let start = i * pixels_per_range;
-
-            let outside_screen = if i + 1 == range_count {
-                (pixels_per_range * range_count).checked_sub(total_pixel_count).unwrap()
-            } else {
-                0
-            };
-
-            let size = pixels_per_range.checked_sub(outside_screen).unwrap();
-
-            ranges.push(PixelRange {
-                start,
-                size,
-            });
-        }
-
-        Arc::new(WorkQueue::new(ranges))
-    };
+    let state = Arc::new(State::new(scene, camera, total_pixel_count, core_count));
 
     println!("Raytracing using {} threads...\n", core_count);
 
@@ -208,17 +216,14 @@ fn main() {
     let start_time  = Instant::now();
 
     for core in 0..core_count {
-        let scene       = scene.clone();
-        let camera      = camera.clone();
-        let queue       = queue.clone();
-        let pixels_done = pixels_done.clone();
+        let state = state.clone();
 
         threads.push(thread::spawn(move || {
-            pin::pin_to_core(core);
+            threading::pin_to_core(core);
 
             let mut results = Vec::with_capacity(RANGES_PER_THREAD);
 
-            while let Some(range) = queue.take() {
+            while let Some(range) = state.queue.pop() {
                 let pixel_count = range.size;
                 let start_pixel = range.start;
 
@@ -238,8 +243,8 @@ fn main() {
                             let u = x / width as f32;
                             let v = 1.0 - (y / height as f32);
 
-                            let ray   = camera.ray(u, v);
-                            let color = trace_ray(&ray, &scene);
+                            let ray   = state.camera.ray(u, v);
+                            let color = trace_ray(&ray, &state.scene);
 
                             color_sum += color;
                         }
@@ -247,10 +252,10 @@ fn main() {
 
                     if i > 0 {
                         if i % PROGRESS_STEP == 0 {
-                            pixels_done.fetch_add(PROGRESS_STEP, Ordering::Relaxed);
+                            state.pixels_done.fetch_add(PROGRESS_STEP, Ordering::Relaxed);
                         } else if i == pixel_count - 1 {
-                            pixels_done.fetch_add(pixel_count % PROGRESS_STEP,
-                                                  Ordering::Relaxed);
+                            state.pixels_done.fetch_add(pixel_count % PROGRESS_STEP,
+                                                        Ordering::Relaxed);
                         }
                     }
 
@@ -270,7 +275,7 @@ fn main() {
     }
 
     loop {
-        let pixels_done = pixels_done.load(Ordering::Relaxed);
+        let pixels_done = state.pixels_done.load(Ordering::Relaxed);
         let progress    = pixels_done as f64 / total_pixel_count as f64;
 
         let elapsed = start_time.elapsed().as_secs_f64();

@@ -19,14 +19,17 @@ impl BvhNode {
             0 => panic!("Cannot build BVH without any objects."),
             1 => {
                 let object = objects[0].take().unwrap();
+
                 BvhNode::Leaf(object.bounding_box().unwrap(), object)
-            },
+            }
             _ => {
                 let get_enclosing_bbox = |objects: &[Option<Box<DynTraceable>>]| {
-                    assert!(!objects.is_empty(), "Cannot get bounding box for empty object slice.");
+                    assert!(!objects.is_empty(),
+                            "Cannot get bounding box for empty object slice.");
 
                     objects.iter().skip(1).fold(get_bbox!(objects[0]),
-                        |bbox, object| AABB::enclosing_box(&bbox, &get_bbox!(object)))
+                        |bbox, object| AABB::enclosing_box(&bbox, &get_bbox!(object))
+                    )
                 };
 
                 let whole_bbox = get_enclosing_bbox(&objects);
@@ -35,6 +38,7 @@ impl BvhNode {
                     let extent = whole_bbox.extent(); 
 
                     let mut longest_axis = 0;
+
                     for i in 1..3 {
                         if extent[i] > extent[longest_axis] {
                             longest_axis = i;
@@ -53,8 +57,8 @@ impl BvhNode {
                 });
 
                 let split_index = {
-                    let mut lowest_cost = std::f32::MAX;
                     let mut lowest_cost_index = 0;
+                    let mut lowest_cost       = std::f32::MAX;
 
                     for i in 1..objects.len() {
                         let get_cost = |objects| {
@@ -65,11 +69,11 @@ impl BvhNode {
                         };
 
                         let (left, right) = objects.split_at_mut(i);
-                        let split_cost = get_cost(left) + get_cost(right); 
+                        let split_cost    = get_cost(left) + get_cost(right); 
 
                         if split_cost < lowest_cost {
-                            lowest_cost = split_cost;
                             lowest_cost_index = i;
+                            lowest_cost       = split_cost;
                         }
                     }
 
@@ -83,12 +87,13 @@ impl BvhNode {
                 let bounds = AABB::enclosing_box(&left.bounding_box(), &right.bounding_box());
 
                 BvhNode::Split(bounds, Box::new(left), Box::new(right))
-            },
+            }
         }
     }
 
     pub fn new(objects: Vec<Box<DynTraceable>>) -> BvhNode {
         let mut objects: Vec<_> = objects.into_iter().map(Some).collect();
+
         BvhNode::construct(&mut objects)
     }
     
@@ -114,7 +119,7 @@ impl BvhNode {
                 } else {
                     None
                 }
-            },
+            }
         }
     }
 }

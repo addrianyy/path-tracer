@@ -21,9 +21,18 @@ impl Sphere {
 
 impl Sphere {
     fn record(&self, t: f32, ray: &Ray) -> HitRecord {
-        let point = ray.point(t);
+        let point     = ray.point(t);
+        let direction = (point - self.center).normalized();
 
-        HitRecord::new(t, point, (point - self.center).normalized(), &*self.material)
+        let phi   = f32::atan2(direction.z, direction.x);
+        let theta = direction.y.asin();
+
+        let pi = std::f32::consts::PI;
+
+        let u = 1.0 - (phi + pi) / (2.0 * pi);
+        let v = (theta + pi / 2.0) / pi;
+
+        HitRecord::new(t, point, direction, &*self.material, u, v)
     }
 }
 

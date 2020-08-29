@@ -1,4 +1,5 @@
 /target
 *.png
+*.jpg
 *.dll
 *.lib

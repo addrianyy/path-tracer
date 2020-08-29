@@ -3,7 +3,7 @@ use crate::traceable::{HitRecord, Traceable, DynTraceable};
 use crate::bvh::BvhNode;
 
 use std::time::Instant;
-use std::io::Write;
+use std::io::{self, Write};
 
 pub struct Scene {
     objects:  Vec<Box<DynTraceable>>,
@@ -19,16 +19,16 @@ impl Scene {
     }
 
     pub fn trace(&self, ray: &Ray) -> Option<HitRecord> {
-        let t_min = 0.001;
+        const T_MIN: f32 = 0.001;
 
         let mut closest_distance = std::f32::MAX;
         let mut closest_record   = None;
 
         if let Some(bvh_root) = self.bvh_root.as_ref() {
-            bvh_root.trace(ray, t_min, closest_distance)
+            bvh_root.trace(ray, T_MIN, closest_distance)
         } else {
             for object in &self.objects {
-                if let Some(record) = object.trace(ray, t_min, closest_distance) {
+                if let Some(record) = object.trace(ray, T_MIN, closest_distance) {
                     closest_distance = record.t;
                     closest_record   = Some(record);
                 }
@@ -43,14 +43,14 @@ impl Scene {
     }
 
     pub fn construct_bvh(&mut self) {
-        print!("Constructing BVH for {} objects...", self.objects.len());
+        print!("Constructing BVH for {} objects... ", self.objects.len());
 
-        std::io::stdout().flush().unwrap();
+        io::stdout().flush().unwrap();
 
         let start_time = Instant::now();
 
         self.bvh_root = Some(BvhNode::new(std::mem::take(&mut self.objects)));
 
-        println!("Done in {:.3}s.", start_time.elapsed().as_secs_f64());
+        println!("done in {:.3}s.", start_time.elapsed().as_secs_f64());
     }
 }
