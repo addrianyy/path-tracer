@@ -2,6 +2,9 @@ use crate::ray::Ray;
 use crate::traceable_object::{HitRecord, TraceableObject, DynTraceable};
 use crate::bvh::BvhNode;
 
+use std::time::Instant;
+use std::io::Write;
+
 pub struct Scene {
     objects:  Vec<Box<DynTraceable>>,
     bvh_root: Option<BvhNode>,
@@ -35,13 +38,19 @@ impl Scene {
         }
     }
 
-    pub fn create_object(&mut self, object: impl TraceableObject + Send + Sync + 'static) {
+    pub fn add(&mut self, object: impl TraceableObject + Send + Sync + 'static) {
         self.objects.push(Box::new(object));
     }
 
     pub fn construct_bvh(&mut self) {
-        crate::timed_block(&format!("Constructing BVH for {} objects", self.objects.len()), || {
-            self.bvh_root = Some(BvhNode::new(std::mem::take(&mut self.objects)));
-        });
+        print!("Constructing BVH for {} objects...", self.objects.len());
+
+        std::io::stdout().flush().unwrap();
+
+        let start_time = Instant::now();
+
+        self.bvh_root = Some(BvhNode::new(std::mem::take(&mut self.objects)));
+
+        println!("Done in {:.3}s.", start_time.elapsed().as_secs_f64());
     }
 }

@@ -11,9 +11,7 @@ mod math;
 mod dielectric;
 mod aabb;
 mod bvh;
-mod timed_block;
-
-pub use timed_block::timed_block;
+mod pin;
 
 use vec::Vec3;
 use ray::Ray;
@@ -63,22 +61,22 @@ fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
 fn load_scene(scene: &mut Scene) {
     let matte1 = Lambertian::new(Vec3::new(0.0, 0.2, 0.5)).create();
     let matte2 = Lambertian::new(Vec3::new(0.3, 0.0, 0.0)).create();
-    scene.create_object(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5, &matte1));
-    scene.create_object(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0, &matte2));
+    scene.add(Sphere::new(Vec3::new(0.0, 0.0, -1.0), 0.5, &matte1));
+    scene.add(Sphere::new(Vec3::new(0.0, -100.5, -1.0), 100.0, &matte2));
 
     let metal1 = Metal::new(Vec3::new(0.8, 0.6, 0.2), 0.0).create();
     let glass1 = Dielectric::new(1.8).create();
     let glass2 = Dielectric::new(0.4).create();
-    scene.create_object(Sphere::new(Vec3::new( 1.5, 0.0, -2.0), 0.5, &metal1));
-    scene.create_object(Sphere::new(Vec3::new(-1.5, 0.0, -2.0), 0.5, &glass1));
-    scene.create_object(Sphere::new(Vec3::new( 3.5, 0.0, -2.0), 0.8, &glass2));
+    scene.add(Sphere::new(Vec3::new( 1.5, 0.0, -2.0), 0.5, &metal1));
+    scene.add(Sphere::new(Vec3::new(-1.5, 0.0, -2.0), 0.5, &glass1));
+    scene.add(Sphere::new(Vec3::new( 3.5, 0.0, -2.0), 0.8, &glass2));
 
     let metal2 = Metal::new(Vec3::new(0.1, 1.0, 0.7), 0.1).create();
-    scene.create_object(Sphere::new(Vec3::new(10.0, 0.0, -10.0), 3.0, &metal2));
+    scene.add(Sphere::new(Vec3::new(10.0, 0.0, -10.0), 3.0, &metal2));
 }
 
 fn random_scene(scene: &mut Scene) {
-    scene.create_object(Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0,
+    scene.add(Sphere::new(Vec3::new(0.0, -1000.0, 0.0), 1000.0,
         &Lambertian::new(Vec3::new(0.5, 0.5, 0.5)).create()));
 
     let mut rng = rand::thread_rng();
@@ -113,18 +111,18 @@ fn random_scene(scene: &mut Scene) {
                     Dielectric::new(1.5).create()
                 };
 
-                scene.create_object(Sphere::new(center, 0.2, &material));
+                scene.add(Sphere::new(center, 0.2, &material));
             }
         }
     }
 
-    scene.create_object(Sphere::new(Vec3::new(0.0, 1.0, 0.0), 1.0,
+    scene.add(Sphere::new(Vec3::new(0.0, 1.0, 0.0), 1.0,
         &Dielectric::new(1.5).create()));
 
-    scene.create_object(Sphere::new(Vec3::new(-4.0, 1.0, 0.0), 1.0,
+    scene.add(Sphere::new(Vec3::new(-4.0, 1.0, 0.0), 1.0,
         &Lambertian::new(Vec3::new(0.4, 0.2, 0.1)).create()));
 
-    scene.create_object(Sphere::new(Vec3::new(4.0, 1.0, 0.0), 1.0,
+    scene.add(Sphere::new(Vec3::new(4.0, 1.0, 0.0), 1.0,
         &Metal::new(Vec3::new(0.7, 0.6, 0.5), 0.0).create()));
 }
 
@@ -160,34 +158,35 @@ struct PixelRange {
 
 fn main() {
     const RANGES_PER_THREAD: usize = 64;
-    const PROGRESS_STEP:     usize = 8192 * 2;
+    const PROGRESS_STEP:     usize = 8192;
 
     let width  = 3840;
     let height = 2160;
-    let samples_per_axis = 16;
+    let samples_per_axis = 64;
 
     let camera = Camera::new(
         Vec3::new(12.0, 2.0, 3.0),
         Vec3::new(0.0, 0.0, 0.0),
         Vec3::new(0.0, 1.0, 0.0),
         20.0,
-        width as f32 / height as f32
+        width as f32 / height as f32,
     );
 
     let mut scene = Scene::new();
 
-    load_scene(&mut scene);
-    //random_scene(&mut scene);
+    //load_scene(&mut scene);
+    random_scene(&mut scene);
+
     scene.construct_bvh();
 
     let scene       = Arc::new(scene);
     let pixels_done = Arc::new(AtomicUsize::new(0));
 
-    let thread_count      = num_cpus::get();
+    let core_count        = num_cpus::get();
     let total_pixel_count = width * height;
 
     let queue = {
-        let range_count      = thread_count * RANGES_PER_THREAD;
+        let range_count      = core_count * RANGES_PER_THREAD;
         let pixels_per_range = (total_pixel_count + range_count - 1) / range_count;
 
         let mut ranges = Vec::with_capacity(range_count);
@@ -212,18 +211,20 @@ fn main() {
         Arc::new(WorkQueue::new(ranges))
     };
 
-    println!("Raytracing using {} threads...\n", thread_count);
+    println!("Raytracing using {} threads...\n", core_count);
 
-    let mut threads = Vec::with_capacity(thread_count);
+    let mut threads = Vec::with_capacity(core_count);
     let start_time  = Instant::now();
 
-    for _ in 0..thread_count {
+    for core in 0..core_count {
         let scene       = scene.clone();
         let camera      = camera.clone();
         let queue       = queue.clone();
         let pixels_done = pixels_done.clone();
 
         threads.push(thread::spawn(move || {
+            pin::pin_to_core(core);
+
             let mut results = Vec::with_capacity(RANGES_PER_THREAD);
 
             while let Some(range) = queue.take() {
@@ -301,13 +302,12 @@ fn main() {
 
         print!("] {:.1}% | {:.3}s elapsed | {:.1}s left", progress * 100.0, elapsed, left);
 
-        io::stdout().flush().unwrap();
-
         if pixels_done == total_pixel_count {
             println!();
             break;
         }
 
+        io::stdout().flush().unwrap();
         thread::sleep(Duration::from_millis(100));
     }
 
