@@ -22,8 +22,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use std::io::{self, Write};
 use std::thread;
+use std::sync::mpsc;
 
-use image::ImageBuffer;
+use image::RgbImage;
 use rand::Rng;
 
 const RANGES_PER_THREAD: usize = 64;
@@ -182,9 +183,9 @@ fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
     color * current_attenuation
 }
 
-
 fn main() {
     const PROGRESS_STEP: usize = 8192;
+    const CHANNELS:      usize = 3;
 
     let width  = 3840;
     let height = 2160;
@@ -208,7 +209,8 @@ fn main() {
     let core_count        = threading::core_count();
     let total_pixel_count = width * height;
 
-    let state = Arc::new(State::new(scene, camera, total_pixel_count, core_count));
+    let (sender, receiver) = mpsc::channel();
+    let state              = Arc::new(State::new(scene, camera, total_pixel_count, core_count));
 
     println!("Raytracing using {} threads...\n", core_count);
 
@@ -216,18 +218,17 @@ fn main() {
     let start_time  = Instant::now();
 
     for core in 0..core_count {
-        let state = state.clone();
+        let state  = state.clone();
+        let sender = sender.clone();
 
         threads.push(thread::spawn(move || {
             threading::pin_to_core(core);
-
-            let mut results = Vec::with_capacity(RANGES_PER_THREAD);
 
             while let Some(range) = state.queue.pop() {
                 let pixel_count = range.size;
                 let start_pixel = range.start;
 
-                let mut pixels = Vec::with_capacity(pixel_count);
+                let mut pixels = Vec::with_capacity(pixel_count * CHANNELS);
 
                 for i in 0..pixel_count {
                     let x = (i + start_pixel) % width;
@@ -260,21 +261,35 @@ fn main() {
                     }
 
                     let samples = samples_per_axis * samples_per_axis;
+                    let color   = color_sum / samples as f32;
 
-                    let color = color_sum / samples as f32;
-                    let color = Vec3::new(color.x.sqrt(), color.y.sqrt(), color.z.sqrt());
+                    let r = (color.x.sqrt() * 255.0) as u8;
+                    let g = (color.y.sqrt() * 255.0) as u8;
+                    let b = (color.z.sqrt() * 255.0) as u8;
 
-                    pixels.push(color);
+                    pixels.push(r);
+                    pixels.push(g);
+                    pixels.push(b);
                 }
 
-                results.push((start_pixel, pixels));
+                sender.send((start_pixel, pixels)).unwrap();
             }
-
-            results
         }));
     }
 
+    drop(sender);
+
+    let mut pixels = vec![0; total_pixel_count * CHANNELS];
+
+    let copy_fragment = |pixels: &mut [u8], (start_pixel, buffer): (usize, Vec<u8>)| {
+        pixels[start_pixel * CHANNELS..][..buffer.len()].copy_from_slice(&buffer);
+    };
+
     loop {
+        while let Ok(fragment) = receiver.try_recv() {
+            copy_fragment(&mut pixels, fragment);
+        }
+
         let pixels_done = state.pixels_done.load(Ordering::Relaxed);
         let progress    = pixels_done as f64 / total_pixel_count as f64;
 
@@ -307,31 +322,20 @@ fn main() {
         thread::sleep(Duration::from_millis(100));
     }
 
-    let mut pixels = vec![Vec3::zero(); total_pixel_count];
+    for fragment in receiver {
+        copy_fragment(&mut pixels, fragment);
+    }
 
     for thread in threads {
-        for (start_pixel, buffer) in thread.join().unwrap() {
-            pixels[start_pixel..][..buffer.len()].copy_from_slice(&buffer);
-        }
+        thread.join().unwrap();
     }
 
-    save_image("output.png", &pixels, width, height);
+    save_image("output.png", pixels, width, height);
 }
 
-fn save_image(path: &str, pixels: &[Vec3], width: usize, height: usize) {
-    let mut imgbuf = ImageBuffer::new(width as u32, height as u32);
-
-    for (x, y, pixel) in imgbuf.enumerate_pixels_mut() {
-        let x = x as usize;
-        let y = y as usize;
-
-        let color = pixels[x + y * width];
-        let r = (color.x * 255.0) as u8;
-        let g = (color.y * 255.0) as u8;
-        let b = (color.z * 255.0) as u8;
-
-        *pixel = image::Rgb([r, g, b]);
-    }
+fn save_image(path: &str, pixels: Vec<u8>, width: usize, height: usize) {
+    let imgbuf = RgbImage::from_raw(width as u32, height as u32, pixels)
+        .expect("Failed to create image buffer for the PNG.");
 
     imgbuf.save(path).expect("Failed to save output image.");
 }
