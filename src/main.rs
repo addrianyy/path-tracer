@@ -9,7 +9,7 @@ mod rng;
 mod bvh;
 mod scene;
 mod camera;
-mod threading;
+mod processors;
 
 pub use math::{Vec3, Ray};
 
@@ -19,7 +19,6 @@ use camera::Camera;
 use traceable::Sphere;
 use material::{Metal, Lambertian, Dielectric};
 use texture::PictureTexture;
-use threading::{PixelRange, PixelQueue};
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -34,6 +33,36 @@ use image::RgbImage;
 const RANGES_PER_THREAD: usize = 64;
 const CHANNELS:          usize = 3;
 const PROGRESS_STEP:     usize = 8192;
+
+#[derive(Copy, Clone)]
+struct PixelRange {
+    start: usize,
+    size:  usize,
+}
+
+struct PixelQueue {
+    queue: Vec<PixelRange>,
+    index: AtomicUsize,
+}
+
+impl PixelQueue {
+    fn new(queue: Vec<PixelRange>) -> Self {
+        Self {
+            queue,
+            index: AtomicUsize::new(0),
+        }
+    }
+
+    fn pop(&self) -> Option<PixelRange> {
+        let index = self.index.fetch_add(1, Ordering::SeqCst);
+
+        if index < self.queue.len() {
+            Some(self.queue[index])
+        } else {
+            None
+        }
+    }
+}
 
 struct State {
     scene:       Scene,
@@ -260,7 +289,8 @@ fn main() {
 
     scene.construct_bvh();
 
-    let core_count        = threading::core_count();
+    let processors        = processors::logical();
+    let core_count        = processors.len();
     let total_pixel_count = width * height;
 
     let (sender, receiver) = mpsc::channel();
@@ -277,12 +307,12 @@ fn main() {
         None
     };
 
-    for core in 0..core_count {
+    for processor in processors {
         let state  = state.clone();
         let sender = sender.clone();
 
         threads.push(thread::spawn(move || {
-            threading::pin_to_core(core);
+            processors::pin_to_processor(&processor);
 
             let mut rng = Rng::new();
 
