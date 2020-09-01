@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod traceable;
 mod material;
 mod texture;
@@ -11,6 +13,7 @@ mod threading;
 
 pub use math::{Vec3, Ray};
 
+use rng::Rng;
 use scene::Scene;
 use camera::Camera;
 use traceable::Sphere;
@@ -27,7 +30,6 @@ use std::thread;
 
 use minifb::{Window, WindowOptions};
 use image::RgbImage;
-use rand::Rng;
 
 const RANGES_PER_THREAD: usize = 64;
 const CHANNELS:          usize = 3;
@@ -102,36 +104,35 @@ fn random_scene(scene: &mut Scene) {
         &Lambertian::new_solid(Vec3::new(0.5, 0.5, 0.5)),
     ));
 
-    let mut rng = rand::thread_rng();
+    let mut rng = Rng::new();
 
-    let random_vec = |min: f32, max: f32| {
-        let mut rng = rand::thread_rng();
-
+    let random_vec = |rng: &mut Rng, min: f32, max: f32| {
         Vec3::new(
-            rng.gen_range(min, max),
-            rng.gen_range(min, max),
-            rng.gen_range(min, max),
+            rng.rand_range(min, max),
+            rng.rand_range(min, max),
+            rng.rand_range(min, max),
         )
     };
 
     for a in -22..22 {
         for b in -22..221 {
             let center = Vec3::new(
-                a as f32 + 0.9 * rng.gen::<f32>(),
+                a as f32 + 0.9 * rng.rand::<f32>(),
                 0.2,
-                b as f32 + 0.9 * rng.gen::<f32>(),
+                b as f32 + 0.9 * rng.rand::<f32>(),
             );
 
             if (center - Vec3::new(3.0, 0.2, 0.0)).length() > 0.9 {
-                let choose_mat: f32 = rng.gen();
+                let choose_mat: f32 = rng.rand();
 
                 let material = if choose_mat < 0.8 {
-                    let albedo = random_vec(0.0, 1.0) * random_vec(0.0, 1.0);
+                    let albedo = random_vec(&mut rng, 0.0, 1.0) * 
+                        random_vec(&mut rng, 0.0, 1.0);
 
                     Lambertian::new_solid(albedo)
                 } else if choose_mat < 0.95 {
-                    let albedo = random_vec(0.5, 1.0);
-                    let fuzz   = rng.gen_range(0.0, 0.5);
+                    let albedo = random_vec(&mut rng, 0.5, 1.0);
+                    let fuzz   = rng.rand_range(0.0, 0.5);
 
                     Metal::new(albedo, fuzz)
                 } else {
@@ -162,7 +163,7 @@ fn random_scene(scene: &mut Scene) {
     ));
 }
 
-fn trace_ray(ray: &Ray, scene: &Scene, rng: &mut rng::Rng) -> Vec3 {
+fn trace_ray(ray: &Ray, scene: &Scene, rng: &mut Rng) -> Vec3 {
     let mut current_attenuation = Vec3::fill(1.0);
     let mut current_ray         = *ray;
 
@@ -283,7 +284,7 @@ fn main() {
         threads.push(thread::spawn(move || {
             threading::pin_to_core(core);
 
-            let mut rng = rng::Rng::new();
+            let mut rng = Rng::new();
 
             while let Some(range) = state.queue.pop() {
                 let pixel_count = range.size;

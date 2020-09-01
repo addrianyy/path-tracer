@@ -33,6 +33,13 @@ impl Rng {
     }
 
     #[inline(always)]
+    pub fn rand_range<T: Random + PartialOrd>(&mut self, min: T, max: T) -> T {
+        assert!(min < max, "Specified range is invalid.");
+
+        T::rand_range(self, min, max)
+    }
+
+    #[inline(always)]
     fn raw_rand(&mut self) -> u64 {
         let mut x = self.0;
 
@@ -46,8 +53,9 @@ impl Rng {
     }
 }
 
-pub trait Random {
+pub trait Random: Sized {
     fn rand(rng: &mut Rng) -> Self;
+    fn rand_range(rng: &mut Rng, min: Self, max: Self) -> Self;
 }
 
 impl Random for f32 {
@@ -56,6 +64,11 @@ impl Random for f32 {
         let v = rng.raw_rand() as u32;
 
         (v >> 8) as f32 / (1u32 << 24) as f32
+    }
+
+    #[inline(always)]
+    fn rand_range(rng: &mut Rng, min: Self, max: Self) -> Self {
+        rng.rand::<Self>() * (max - min) + min
     }
 }
 
@@ -66,6 +79,11 @@ impl Random for f64 {
 
         (v >> 11) as f64 / (1u64 << 53) as f64
     }
+
+    #[inline(always)]
+    fn rand_range(rng: &mut Rng, min: Self, max: Self) -> Self {
+        rng.rand::<Self>() * (max - min) + min
+    }
 }
 
 macro_rules! implement_simple_rand {
@@ -74,6 +92,11 @@ macro_rules! implement_simple_rand {
             #[inline(always)]
             fn rand(rng: &mut Rng) -> Self {
                 rng.raw_rand() as Self
+            }
+
+            #[inline(always)]
+            fn rand_range(_rng: &mut Rng, _min: Self, _max: Self) -> Self {
+                unimplemented!()
             }
         }
     };
