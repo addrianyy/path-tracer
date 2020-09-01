@@ -2,6 +2,7 @@ use super::{Material, SharedMaterial};
 use crate::{Vec3, Ray};
 use crate::traceable::HitRecord;
 use crate::texture::{SharedTexture, SolidTexture};
+use crate::rng::Rng;
 use crate::math;
 
 pub struct Lambertian {
@@ -23,8 +24,8 @@ impl Lambertian {
 }
 
 impl Material for Lambertian {
-    fn scatter(&self, _ray: &Ray, record: &HitRecord) -> Option<(Vec3, Ray)> {
-        let target = record.point + record.normal + math::random_in_unit_sphere();
+    fn scatter(&self, _ray: &Ray, record: &HitRecord, rng: &mut Rng) -> Option<(Vec3, Ray)> {
+        let target = record.point + record.normal + math::random_in_unit_sphere(rng);
         let color  = self.albedo.color(record.u, record.v, record.point);
 
         Some((color, Ray::new(record.point, target - record.point)))

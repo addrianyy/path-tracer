@@ -6,13 +6,11 @@ pub use vec::Vec3;
 pub use ray::Ray;
 pub use aabb::AABB;
 
-use rand::Rng;
+use crate::rng::Rng;
 
-pub fn random_in_unit_sphere() -> Vec3 {
-    let mut rng = rand::thread_rng();
-
+pub fn random_in_unit_sphere(rng: &mut Rng) -> Vec3 {
     loop {
-        let vec = (Vec3::new(rng.gen(), rng.gen(), rng.gen()) * 2.0) - Vec3::fill(1.0);
+        let vec = (Vec3::new(rng.rand(), rng.rand(), rng.rand()) * 2.0) - Vec3::fill(1.0);
 
         if vec.length_sqr() < 1.0 {
             break vec

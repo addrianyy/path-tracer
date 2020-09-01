@@ -1,9 +1,8 @@
 use super::{Material, SharedMaterial};
 use crate::{Vec3, Ray};
 use crate::traceable::HitRecord;
+use crate::rng::Rng;
 use crate::math;
-
-use rand::Rng;
 
 pub struct Dielectric {
     ref_idx: f32
@@ -18,7 +17,7 @@ impl Dielectric {
 }
 
 impl Material for Dielectric {
-    fn scatter(&self, ray: &Ray, record: &HitRecord) -> Option<(Vec3, Ray)> {
+    fn scatter(&self, ray: &Ray, record: &HitRecord, rng: &mut Rng) -> Option<(Vec3, Ray)> {
         let dir = ray.direction;
 
         let (outward_normal, ni_over_nt, cosine) = if Vec3::dot(dir, record.normal) > 0.0 {
@@ -35,7 +34,7 @@ impl Material for Dielectric {
 
         if let Some(refracted) = math::refract(dir, outward_normal, ni_over_nt) {
             let reflect_prob = math::schlick(cosine, self.ref_idx);
-            let rand: f32    = rand::thread_rng().gen();
+            let rand: f32    = rng.rand();
 
             let new_dir = if rand < reflect_prob {
                 reflected

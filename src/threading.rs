@@ -1,4 +1,3 @@
-use std::convert::TryInto;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Copy, Clone)]
@@ -36,12 +35,39 @@ pub fn core_count() -> usize {
 }
 
 #[cfg(target_os = "windows")]
-pub fn pin_to_core(_core_id: usize) {
-    // TODO
+pub fn pin_to_core(core_id: usize) {
+    #[repr(C)]
+    struct GROUP_AFFINITY {
+        mask:     u64,
+        group:    u16,
+        reserved: [u16; 3],
+    }
+
+	extern {
+		fn SetThreadGroupAffinity(thread: usize, group_affinity: *const GROUP_AFFINITY,
+                                  previous_group_affinity: *mut GROUP_AFFINITY) -> i32;
+		fn GetCurrentThread() -> usize;
+	}
+
+    let core_id = core_id as u64;
+
+    let group_affinity = GROUP_AFFINITY {
+        mask:     1 << (core_id % 64),
+        group:    core_id as u16 / 64,
+        reserved: [0; 3],
+    };
+
+    unsafe {
+        let result = SetThreadGroupAffinity(GetCurrentThread(), &group_affinity,
+                                            std::ptr::null_mut());
+        assert!(result != 0, "Pinning thread to specified core failed.");
+    }
 }
 
 #[cfg(target_os = "linux")]
 pub fn pin_to_core(core_id: usize) {
+    use std::convert::TryInto;
+
     const USIZE_BITS: usize = std::mem::size_of::<usize>() * 8;
     const GETTID:     usize = 186;
 

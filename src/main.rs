@@ -3,6 +3,7 @@ mod material;
 mod texture;
 mod math;
 
+mod rng;
 mod bvh;
 mod scene;
 mod camera;
@@ -161,7 +162,7 @@ fn random_scene(scene: &mut Scene) {
     ));
 }
 
-fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
+fn trace_ray(ray: &Ray, scene: &Scene, rng: &mut rng::Rng) -> Vec3 {
     let mut current_attenuation = Vec3::fill(1.0);
     let mut current_ray         = *ray;
 
@@ -169,7 +170,9 @@ fn trace_ray(ray: &Ray, scene: &Scene) -> Vec3 {
 
     for _ in 0..MAX_TRACES {
         if let Some(record) = scene.trace(&current_ray) {
-            if let Some((attenuation, new_ray)) = record.material.scatter(&current_ray, &record) {
+            let scattered = record.material.scatter(&current_ray, &record, rng);
+
+            if let Some((attenuation, new_ray)) = scattered {
                 current_attenuation *= attenuation;
                 current_ray          = new_ray;
             } else {
@@ -280,6 +283,8 @@ fn main() {
         threads.push(thread::spawn(move || {
             threading::pin_to_core(core);
 
+            let mut rng = rng::Rng::new();
+
             while let Some(range) = state.queue.pop() {
                 let pixel_count = range.size;
                 let start_pixel = range.start;
@@ -301,7 +306,7 @@ fn main() {
                             let v = 1.0 - (y / height as f32);
 
                             let ray   = state.camera.ray(u, v);
-                            let color = trace_ray(&ray, &state.scene);
+                            let color = trace_ray(&ray, &state.scene, &mut rng);
 
                             color_sum += color;
                         }
