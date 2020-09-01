@@ -389,7 +389,6 @@ version = "0.1.0"
 dependencies = [
  "image",
  "minifb",
- "num_cpus",
 ]
 
 [[package]]

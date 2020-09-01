@@ -1,8 +1,18 @@
+use std::collections::BTreeSet;
+
+fn remove_hyperthreads<T, Y: Ord>(processors: &mut Vec<T>,
+                                  mut get_core_id: impl FnMut(&T) -> Y) {
+    let mut physical_processors = BTreeSet::new();
+
+    processors.retain(|processor| {
+        physical_processors.insert(get_core_id(processor))
+    });
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
     use std::fs::File;
     use std::convert::TryInto;
-    use std::collections::BTreeSet;
     use std::io::{BufReader, BufRead};
 
     const INVALID_CORE_ID:     u32 = !0;
@@ -93,11 +103,7 @@ mod linux {
         }
 
         if !include_hyperthreads {
-            let mut physical_processors = BTreeSet::new();
-
-            processors.retain(|processor| {
-                physical_processors.insert((processor.core_id, processor.physical_id))
-            });
+            super::remove_hyperthreads(&mut processors, |p| p.core_id);
         }
 
         processors
@@ -140,34 +146,133 @@ mod linux {
 
 #[cfg(target_os = "windows")]
 mod windows {
+    #[repr(C)]
+    struct GROUP_AFFINITY {
+        mask:     usize,
+        group:    u16,
+        reserved: [u16; 3],
+    }
+
     #[derive(Copy, Clone)]
     pub struct Processor {
-        id:    u32,
-        group: u16,
+        id:      u32,
+        group:   u16,
+        core_id: u32,
     }
 
     pub(super) fn processors(include_hyperthreads: bool) -> Vec<Processor> {
-        unimplemented!()
+        const RELATION_PROCESSOR_CORE: u32 = 0;
+        const USIZE_SIZE:              usize = std::mem::size_of::<usize>();
+
+        #[repr(C)]
+        struct PROCESSOR_RELATIONSHIP {
+            flags:            u8,
+            efficiency_class: u8,
+            reserved:         [u8; 20],
+            group_count:      u16,
+            //group_mask:     [GROUP_AFFINITY; 0],
+        }
+
+        #[repr(C)]
+        struct SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX  {
+            relationship: u32,
+            size:         u32,
+            processor:    PROCESSOR_RELATIONSHIP,
+        }
+
+        extern {
+            fn GetLogicalProcessorInformationEx(relationship: u32, buffer: *mut u8,
+                                                returned_length: *mut u32) -> i32;
+        }
+
+        let mut buffer: Vec<usize> = Vec::new();
+        let mut length: u32;
+
+        let mut tries = 0;
+
+        loop {
+            length = (buffer.len() * USIZE_SIZE) as u32;
+
+            let result = unsafe {
+                GetLogicalProcessorInformationEx(RELATION_PROCESSOR_CORE,
+                                                 buffer.as_mut_ptr() as _, &mut length)
+            };
+
+            if result == 1 {
+                break;
+            }
+
+            if tries > 5 {
+                panic!("Getting logical processor information failed after {} tries.", tries);
+            }
+
+            buffer = vec![0usize; (length as usize + USIZE_SIZE - 1) / USIZE_SIZE];
+            tries += 1;
+        }
+
+        let mut remaining = length as usize;
+        let mut offset    = 0;
+        let mut core_id   = 0;
+
+        let mut processors = Vec::new();
+
+        while remaining > 0 {
+            assert!(remaining >= std::mem::size_of::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(),
+                    "Invalid amount of remaining bytes.");
+
+            let information = unsafe {
+                let ptr = buffer.as_ptr() as usize + offset;
+
+                &*(ptr as *const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)
+            };
+
+            let group_count = information.processor.group_count as usize;
+
+            for index in 0..group_count {
+                let group = unsafe {
+                    let ptr = &information.processor as *const _ as usize +
+                        std::mem::size_of::<PROCESSOR_RELATIONSHIP>() +
+                        std::mem::size_of::<GROUP_AFFINITY>() * index;
+
+                    &*(ptr as *const GROUP_AFFINITY)
+                };
+
+                let mask_size = std::mem::size_of::<usize>() as u32 * 8;
+
+                for id in 0..mask_size {
+                    if group.mask & (1 << id) != 0 {
+                        processors.push(Processor {
+                            id,
+                            core_id,
+                            group: group.group,
+                        });
+                    }
+                }
+            }
+
+            let size = information.size as usize;
+
+            offset    += size;
+            remaining -= size;
+            core_id   += 1;
+        }
+
+        if !include_hyperthreads {
+            super::remove_hyperthreads(&mut processors, |p| p.core_id);
+        }
+
+        processors
     }
 
     pub fn pin_to_processor(processor: &Processor) {
-        #[repr(C)]
-        struct GROUP_AFFINITY {
-            mask:     u64,
-            group:    u16,
-            reserved: [u16; 3],
-        }
-
         extern {
             fn SetThreadGroupAffinity(thread: usize, group_affinity: *const GROUP_AFFINITY,
                                       previous_group_affinity: *mut GROUP_AFFINITY) -> i32;
             fn GetCurrentThread() -> usize;
         }
 
-        assert!(processor.id < 64, "Invalid processor ID.");
-
         let group_affinity = GROUP_AFFINITY {
-            mask:     1 << processor.id,
+            mask:     1usize.checked_shl(processor.id).expect("Invalid processor ID."),
             group:    processor.group,
             reserved: [0; 3],
         };

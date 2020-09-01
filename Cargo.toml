@@ -5,6 +5,5 @@ authors = ["addrianyy <adrianvpl@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-num_cpus = "1.13"
 minifb = "0.18"
 image = "0.23"
