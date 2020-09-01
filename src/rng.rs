@@ -53,18 +53,18 @@ pub trait Random {
 impl Random for f32 {
     #[inline(always)]
     fn rand(rng: &mut Rng) -> Self {
-		let v = rng.raw_rand() as u32;
-		
-		(v >> 8) as f32 / (1u32 << 24) as f32
+        let v = rng.raw_rand() as u32;
+
+        (v >> 8) as f32 / (1u32 << 24) as f32
     }
 }
 
 impl Random for f64 {
     #[inline(always)]
     fn rand(rng: &mut Rng) -> Self {
-		let v = rng.raw_rand();
-		
-		(v >> 11) as f64 / (1u64 << 53) as f64
+        let v = rng.raw_rand();
+
+        (v >> 11) as f64 / (1u64 << 53) as f64
     }
 }
 

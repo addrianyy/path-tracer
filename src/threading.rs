@@ -43,11 +43,11 @@ pub fn pin_to_core(core_id: usize) {
         reserved: [u16; 3],
     }
 
-	extern {
-		fn SetThreadGroupAffinity(thread: usize, group_affinity: *const GROUP_AFFINITY,
+    extern {
+        fn SetThreadGroupAffinity(thread: usize, group_affinity: *const GROUP_AFFINITY,
                                   previous_group_affinity: *mut GROUP_AFFINITY) -> i32;
-		fn GetCurrentThread() -> usize;
-	}
+        fn GetCurrentThread() -> usize;
+    }
 
     let core_id = core_id as u64;
 
