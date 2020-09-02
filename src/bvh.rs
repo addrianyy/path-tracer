@@ -1,4 +1,4 @@
-use crate::Ray;
+use crate::{Vec3, Ray};
 use crate::math::AABB;
 use crate::traceable::{HitRecord, DynTraceable};
 
@@ -35,7 +35,7 @@ impl BvhNode {
                 let whole_bbox = get_enclosing_bbox(&objects);
 
                 let split_axis = {
-                    let extent = whole_bbox.extent(); 
+                    let extent = whole_bbox.extent().extract_array();
 
                     let mut longest_axis = 0;
 
@@ -49,11 +49,10 @@ impl BvhNode {
                 };
 
                 objects.sort_unstable_by(|a, b| {
-                    let bbox_a = get_bbox!(a);
-                    let bbox_b = get_bbox!(b);
+                    let a = get_bbox!(a).center().extract_array()[split_axis];
+                    let b = get_bbox!(b).center().extract_array()[split_axis];
 
-                    bbox_a.center()[split_axis].partial_cmp(&bbox_b.center()[split_axis])
-                        .unwrap_or(Ordering::Equal)
+                    a.partial_cmp(&b).unwrap_or(Ordering::Equal)
                 });
 
                 let split_index = {
@@ -104,17 +103,18 @@ impl BvhNode {
         }
     }
 
-    pub fn trace(&self, ray: &Ray, min_t: f32, max_t: f32) -> Option<HitRecord> {
+    pub fn trace(&self, ray: &Ray, inv_direction: Vec3,
+                 min_t: f32, max_t: f32) -> Option<HitRecord> {
         match self {
             BvhNode::Leaf(_, traceable)    => traceable.trace(ray, min_t, max_t),
             BvhNode::Split(_, left, right) => {
-                if self.bounding_box().intersect(ray, min_t, max_t) {
-                    match left.trace(ray, min_t, max_t) {
-                        Some(record) => match right.trace(ray, min_t, record.t) {
+                if self.bounding_box().intersect(ray, inv_direction, min_t, max_t) {
+                    match left.trace(ray, inv_direction, min_t, max_t) {
+                        Some(record) => match right.trace(ray, inv_direction, min_t, record.t) {
                             Some(record) => Some(record),
                             None         => Some(record),
                         },
-                        None => right.trace(ray, min_t, max_t),
+                        None => right.trace(ray, inv_direction, min_t, max_t),
                     }
                 } else {
                     None

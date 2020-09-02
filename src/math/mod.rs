@@ -10,10 +10,14 @@ use crate::rng::Rng;
 
 pub fn random_in_unit_sphere(rng: &mut Rng) -> Vec3 {
     loop {
-        let vec = (Vec3::new(rng.rand(), rng.rand(), rng.rand()) * 2.0) - Vec3::fill(1.0);
+        let x = rng.rand_range(-1.0, 1.0);
+        let y = rng.rand_range(-1.0, 1.0);
+        let z = rng.rand_range(-1.0, 1.0);
 
-        if vec.length_sqr() < 1.0 {
-            break vec
+        let vec = Vec3::new(x, y, z);
+
+        if vec.length_sqr() < 0.999 {
+            break vec;
         }
     }
 }
@@ -37,5 +41,9 @@ pub fn schlick(cosine: f32, ref_idx: f32) -> f32 {
     let r0 = (1.0 - ref_idx) / (1.0 + ref_idx);
     let r0 = r0 * r0;
 
-    r0 + (1.0 - r0) * (1.0 - cosine).powf(5.0)
+    let v  = r0 + (1.0 - r0) * (1.0 - cosine);
+    let v2 = v * v;
+    let v4 = v2 * v2;
+
+    v4 * v
 }

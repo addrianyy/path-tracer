@@ -7,6 +7,15 @@ pub struct Ray {
 }
 
 impl Ray {
+    #[inline(always)]
+    pub fn new_normalized(origin: Vec3, direction: Vec3) -> Self {
+        Self {
+            origin,
+            direction,
+        }
+    }
+
+    #[inline(always)]
     pub fn new(origin: Vec3, direction: Vec3) -> Self {
         Self {
             origin,

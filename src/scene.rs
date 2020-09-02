@@ -1,4 +1,4 @@
-use crate::Ray;
+use crate::{Vec3, Ray};
 use crate::traceable::{HitRecord, Traceable, DynTraceable};
 use crate::bvh::BvhNode;
 
@@ -25,7 +25,9 @@ impl Scene {
         let mut closest_record   = None;
 
         if let Some(bvh_root) = self.bvh_root.as_ref() {
-            bvh_root.trace(ray, T_MIN, closest_distance)
+            let inv_direction = Vec3::fill(1.0) / ray.direction;
+
+            bvh_root.trace(ray, inv_direction, T_MIN, closest_distance)
         } else {
             for object in &self.objects {
                 if let Some(record) = object.trace(ray, T_MIN, closest_distance) {

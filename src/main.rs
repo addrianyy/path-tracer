@@ -213,7 +213,7 @@ fn trace_ray(ray: &Ray, scene: &Scene, rng: &mut Rng) -> Vec3 {
         }
     }
 
-    let t     = 0.5 * (ray.direction.y + 1.0);
+    let t     = 0.5 * (ray.direction.y() + 1.0);
     let color = Vec3::new(1.0, 1.0, 1.0) * (1.0 - t) + Vec3::new(0.5, 0.7, 1.0) * t;
 
     color * current_attenuation
@@ -352,16 +352,13 @@ fn main() {
                         }
                     }
 
-                    let samples = samples_per_axis * samples_per_axis;
-                    let color   = color_sum / samples as f32;
+                    let samples   = samples_per_axis * samples_per_axis;
+                    let color     = (color_sum / samples as f32).sqrt() * Vec3::fill(255.0);
+                    let (r, g, b) = color.extract();
 
-                    let r = (color.x.sqrt() * 255.0) as u8;
-                    let g = (color.y.sqrt() * 255.0) as u8;
-                    let b = (color.z.sqrt() * 255.0) as u8;
-
-                    pixels.push(r);
-                    pixels.push(g);
-                    pixels.push(b);
+                    pixels.push(r as u8);
+                    pixels.push(g as u8);
+                    pixels.push(b as u8);
                 }
 
                 sender.send((start_pixel, pixels)).unwrap();

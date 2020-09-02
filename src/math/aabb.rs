@@ -22,11 +22,16 @@ impl AABB {
         (self.min + self.max) * 0.5 
     }
 
-    pub fn intersect(&self, ray: &Ray, min_t: f32, max_t: f32) -> bool {
+    pub fn intersect(&self, ray: &Ray, inv_direction: Vec3, min_t: f32, max_t: f32) -> bool {
+        let inv_direction = inv_direction.extract_array();
+        let origin        = ray.origin.extract_array();
+        let min           = self.min.extract_array();
+        let max           = self.max.extract_array();
+
         let calc = |a, min_t, max_t| {
-            let inv = 1.0 / ray.direction[a];
-            let t0  = (self.min[a] - ray.origin[a]) * inv;
-            let t1  = (self.max[a] - ray.origin[a]) * inv;
+            let inv     = inv_direction[a];
+            let t0: f32 = (min[a] - origin[a]) * inv;
+            let t1: f32 = (max[a] - origin[a]) * inv;
 
             let (t0, t1) = if inv < 0.0 { (t1, t0) } else { (t0, t1) };
 
@@ -51,24 +56,15 @@ impl AABB {
     }
 
     pub fn enclosing_box(box0: &AABB, box1: &AABB) -> AABB {
-        let bbmin = Vec3::new(
-            f32::min(box0.min.x, box1.min.x),
-            f32::min(box0.min.y, box1.min.y),
-            f32::min(box0.min.z, box1.min.z),
-        );
-
-        let bbmax = Vec3::new(
-            f32::max(box0.max.x, box1.max.x),
-            f32::max(box0.max.y, box1.max.y),
-            f32::max(box0.max.z, box1.max.z),
-        );
+        let bbmin = Vec3::min(box0.min, box1.min);
+        let bbmax = Vec3::max(box0.max, box1.max);
         
         AABB::new(bbmin, bbmax)
     }
 
     pub fn volume(&self) -> f32 {
-        let ex = self.extent();
+        let (x, y, z) = self.extent().extract();
 
-        (ex.x * ex.y * ex.z).abs()
+        (x * y * z).abs()
     }
 }

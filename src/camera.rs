@@ -27,10 +27,13 @@ impl Camera {
         }
     }
 
+    #[inline(always)]
     pub fn ray(&self, u: f32, v: f32) -> Ray {
         let direction = (self.lower_left_corner + self.horizontal * u + self.vertical * v) -
             self.origin;
 
-        Ray::new(self.origin, direction)
+        // `direction` is almost normalized so it should be fine. Calling normal `new`
+        // will significantly degrade the performance.
+        Ray::new_normalized(self.origin, direction)
     }
 }

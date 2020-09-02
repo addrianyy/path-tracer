@@ -3,6 +3,20 @@ use crate::{Vec3, Ray};
 use crate::math::AABB;
 use crate::material::SharedMaterial;
 
+fn sphere_uv(record: &HitRecord) -> (f32, f32) {
+    let (x, y, z) = record.normal.extract();
+
+    let phi   = f32::atan2(z, x);
+    let theta = y.asin();
+
+    let pi = std::f32::consts::PI;
+
+    let u = 1.0 - (phi + pi) / (2.0 * pi);
+    let v = (theta + pi / 2.0) / pi;
+
+    (u, v)
+}
+
 pub struct Sphere {
     center:   Vec3,
     radius:   f32,
@@ -24,15 +38,7 @@ impl Sphere {
         let point     = ray.point(t);
         let direction = (point - self.center).normalized();
 
-        let phi   = f32::atan2(direction.z, direction.x);
-        let theta = direction.y.asin();
-
-        let pi = std::f32::consts::PI;
-
-        let u = 1.0 - (phi + pi) / (2.0 * pi);
-        let v = (theta + pi / 2.0) / pi;
-
-        HitRecord::new(t, point, direction, &*self.material, u, v)
+        HitRecord::new(t, point, direction, &*self.material, sphere_uv)
     }
 }
 

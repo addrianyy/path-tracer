@@ -10,24 +10,26 @@ pub type DynTraceable = dyn Traceable + Send + Sync;
 
 pub struct HitRecord<'a> {
     pub t:        f32,
-    pub u:        f32,
-    pub v:        f32,
     pub point:    Vec3,
     pub normal:   Vec3,
     pub material: &'a dyn Material,
+    get_uv:       fn(&HitRecord) -> (f32, f32),
 }
 
 impl<'a> HitRecord<'a> {
     pub fn new(t: f32, point: Vec3, normal: Vec3, material: &'a dyn Material,
-               u: f32, v: f32) -> Self {
+               get_uv: fn(&HitRecord) -> (f32, f32)) -> Self {
         Self {
             t,
-            u,
-            v,
             point,
             normal,
             material,
+            get_uv,
         }
+    }
+
+    pub fn uv(&self) -> (f32, f32) {
+        (self.get_uv)(self)
     }
 }
 
