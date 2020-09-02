@@ -9,17 +9,11 @@ pub use aabb::AABB;
 use crate::rng::Rng;
 
 pub fn random_in_unit_sphere(rng: &mut Rng) -> Vec3 {
-    loop {
-        let x = rng.rand_range(-1.0, 1.0);
-        let y = rng.rand_range(-1.0, 1.0);
-        let z = rng.rand_range(-1.0, 1.0);
+    let x = rng.rand_range(-1.0, 1.0);
+    let y = rng.rand_range(-1.0, 1.0);
+    let z = rng.rand_range(-1.0, 1.0);
 
-        let vec = Vec3::new(x, y, z);
-
-        if vec.length_sqr() < 0.999 {
-            break vec;
-        }
-    }
+    Vec3::new(x, y, z).normalized()
 }
 
 pub fn reflect(direction: Vec3, normal: Vec3) -> Vec3 {
