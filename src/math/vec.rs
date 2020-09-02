@@ -43,6 +43,24 @@ mod vectorized {
         x * y * z
     }
 
+    /*
+    pub fn cross_product(a: ArchVector, b: ArchVector) -> ArchVector {
+        unsafe {
+            let a_yzx = _mm_shuffle_ps(a, a, _MM_SHUFFLE(3, 0, 2, 1));
+            let b_yzx = _mm_shuffle_ps(b, b, _MM_SHUFFLE(3, 0, 2, 1));
+            let c     = _mm_sub_ps(_mm_mul_ps(a, b_yzx), _mm_mul_ps(a_yzx, b));
+
+            _mm_shuffle_ps(c, c, _MM_SHUFFLE(3, 0, 2, 1))
+        }
+    }
+    */
+
+    pub fn normalize(v: ArchVector) -> ArchVector {
+        unsafe {
+            _mm_mul_ps(v, _mm_rsqrt_ps(fill(sum(mul(v, v)))))
+        }
+    }
+
     pub fn add(a: ArchVector, b: ArchVector) -> ArchVector { unsafe { _mm_add_ps(a, b) } }
     pub fn sub(a: ArchVector, b: ArchVector) -> ArchVector { unsafe { _mm_sub_ps(a, b) } }
     pub fn mul(a: ArchVector, b: ArchVector) -> ArchVector { unsafe { _mm_mul_ps(a, b) } }
@@ -50,6 +68,11 @@ mod vectorized {
     pub fn min(a: ArchVector, b: ArchVector) -> ArchVector { unsafe { _mm_min_ps(a, b) } }
     pub fn max(a: ArchVector, b: ArchVector) -> ArchVector { unsafe { _mm_max_ps(a, b) } }
     pub fn sqrt(a: ArchVector)               -> ArchVector { unsafe { _mm_sqrt_ps(a) } }
+
+    #[allow(non_snake_case)]
+    const fn _MM_SHUFFLE(z: u32, y: u32, x: u32, w: u32) -> i32 {
+        ((z << 6) | (y << 4) | (x << 2) | w) as i32
+    }
 }
 
 use vectorized::ArchVector;
@@ -60,10 +83,12 @@ pub struct Vec3 {
 }
 
 impl Vec3 {
+    #[inline(always)]
     fn vector(&self) -> ArchVector {
         self.vector
     }
 
+    #[inline(always)]
     fn from_vector(vector: ArchVector) -> Self {
         Self {
             vector,
@@ -93,7 +118,7 @@ impl Vec3 {
     }
 
     pub fn normalized(self) -> Self {
-        self / self.length()
+         Self::from_vector(vectorized::normalize(self.vector()))
     }
 
     pub fn dot(a: Self, b: Self) -> f32 {
@@ -129,6 +154,7 @@ impl Vec3 {
 
     pub fn extract_array(&self) -> [f32; 3] {
         let (x, y, z) = self.extract();
+
         [x, y, z]
     }
 
