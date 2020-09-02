@@ -213,7 +213,7 @@ fn trace_ray(ray: &Ray, scene: &Scene, rng: &mut Rng) -> Vec3 {
         }
     }
 
-    let t     = 0.5 * (ray.direction.y() + 1.0);
+    let t     = 0.5 * (ray.direction.extract().1 + 1.0);
     let color = Vec3::new(1.0, 1.0, 1.0) * (1.0 - t) + Vec3::new(0.5, 0.7, 1.0) * t;
 
     color * current_attenuation
