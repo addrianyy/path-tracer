@@ -5,28 +5,34 @@ use std::ops::{Add, Sub, Mul, Div, Neg, AddAssign, SubAssign, MulAssign, DivAssi
 mod vectorized {
     use std::arch::x86_64::*;
 
+    #[repr(C, align(16))]
+    struct AlignedSseArray([f32; 4]);
+
     pub type ArchVector = __m128;
 
     pub fn new(x: f32, y: f32, z: f32) -> ArchVector {
-        let array = [x, y, z, 0.0];
+        let array = AlignedSseArray([x, y, z, 0.0]);
 
         unsafe {
-            _mm_loadu_ps(array.as_ptr() as *const _ as _)
+            _mm_load_ps(array.0.as_ptr())
         }
     }
+
+    pub fn fill(v: f32) -> ArchVector { unsafe { _mm_set1_ps(v) } }
+    pub fn zero()       -> ArchVector { unsafe { _mm_setzero_ps() } }
 
     pub fn extract(vector: ArchVector) -> (f32, f32, f32) {
-        let mut array = [0.0, 0.0, 0.0, 0.0];
+        let mut array = AlignedSseArray([0.0, 0.0, 0.0, 0.0]);
 
         unsafe {
-            _mm_storeu_ps(array.as_mut_ptr() as *mut _ as _, vector);
+            _mm_store_ps(array.0.as_mut_ptr(), vector);
         }
 
-        (array[0], array[1], array[2])
+        (array.0[0], array.0[1], array.0[2])
     }
 
-    pub fn sum(v: ArchVector) -> f32 {
-        let (x, y, z) = extract(v);
+    pub fn sum(vector: ArchVector) -> f32 {
+        let (x, y, z) = extract(vector);
 
         x + y + z
     }
@@ -37,16 +43,13 @@ mod vectorized {
         x * y * z
     }
 
-    pub fn zero() -> ArchVector { unsafe { _mm_setzero_ps() } }
-    pub fn fill(v: f32) -> ArchVector { unsafe { _mm_set1_ps(v) } }
-
     pub fn add(a: ArchVector, b: ArchVector) -> ArchVector { unsafe { _mm_add_ps(a, b) } }
     pub fn sub(a: ArchVector, b: ArchVector) -> ArchVector { unsafe { _mm_sub_ps(a, b) } }
     pub fn mul(a: ArchVector, b: ArchVector) -> ArchVector { unsafe { _mm_mul_ps(a, b) } }
     pub fn div(a: ArchVector, b: ArchVector) -> ArchVector { unsafe { _mm_div_ps(a, b) } }
     pub fn min(a: ArchVector, b: ArchVector) -> ArchVector { unsafe { _mm_min_ps(a, b) } }
     pub fn max(a: ArchVector, b: ArchVector) -> ArchVector { unsafe { _mm_max_ps(a, b) } }
-    pub fn sqrt(a: ArchVector) -> ArchVector { unsafe { _mm_sqrt_ps(a) } }
+    pub fn sqrt(a: ArchVector)               -> ArchVector { unsafe { _mm_sqrt_ps(a) } }
 }
 
 use vectorized::ArchVector;
