@@ -23,36 +23,16 @@ impl AABB {
     }
 
     pub fn intersect(&self, ray: &Ray, inv_direction: Vec3, min_t: f32, max_t: f32) -> bool {
-        let inv_direction = inv_direction.extract_array();
-        let origin        = ray.origin.extract_array();
-        let min           = self.min.extract_array();
-        let max           = self.max.extract_array();
+        let v0 = (self.min - ray.origin) * inv_direction;
+        let v1 = (self.max - ray.origin) * inv_direction;
 
-        let calc = |a, min_t, max_t| {
-            let inv     = inv_direction[a];
-            let t0: f32 = (min[a] - origin[a]) * inv;
-            let t1: f32 = (max[a] - origin[a]) * inv;
+        let min = Vec3::min(v0, v1).extract();
+        let max = Vec3::max(v0, v1).extract();
 
-            let (t0, t1) = if inv < 0.0 { (t1, t0) } else { (t0, t1) };
+        let min_t = f32::max(min_t, f32::max(min.0, f32::max(min.1, min.2)));
+        let max_t = f32::min(max_t, f32::min(max.0, f32::min(max.1, max.2)));
 
-            (t0.max(min_t), t1.min(max_t))
-        };
-
-        let (tmin1, tmax1) = calc(0, min_t, max_t);
-
-        if tmax1 <= tmin1 {
-            false
-        } else {
-            let (tmin2, tmax2) = calc(1, tmin1, tmax1);
-
-            if tmax2 <= tmin2 {
-                false
-            } else {
-                let (tmin3, tmax3) = calc(2, tmin2, tmax2);
-
-                tmax3 > tmin3
-            }
-        }
+        min_t < max_t
     }
 
     pub fn enclosing_box(box0: &AABB, box1: &AABB) -> AABB {
