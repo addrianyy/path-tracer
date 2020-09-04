@@ -19,13 +19,14 @@ impl Dielectric {
 impl Material for Dielectric {
     fn scatter(&self, ray: &Ray, record: &HitRecord, rng: &mut Rng) -> Option<(Vec3, Ray)> {
         let dir = ray.direction;
+        let dot = Vec3::dot(dir, record.normal);
 
-        let (outward_normal, ni_over_nt, cosine) = if Vec3::dot(dir, record.normal) > 0.0 {
-            let cosine = self.ref_idx * Vec3::dot(dir, record.normal);
+        let (outward_normal, ni_over_nt, cosine) = if dot > 0.0 {
+            let cosine = self.ref_idx * dot;
 
             (-record.normal, self.ref_idx, cosine)
         } else {
-            let cosine = -Vec3::dot(dir, record.normal);
+            let cosine = -dot;
 
             (record.normal, 1.0 / self.ref_idx, cosine)
         };
