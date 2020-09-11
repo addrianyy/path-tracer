@@ -35,5 +35,5 @@ impl<'a> HitRecord<'a> {
 
 pub trait Traceable {
     fn trace(&self, ray: &Ray, min_t: f32, max_t: f32) -> Option<HitRecord>; 
-    fn bounding_box(&self) -> Option<AABB>;
+    fn bounding_box(&self) -> AABB;
 }

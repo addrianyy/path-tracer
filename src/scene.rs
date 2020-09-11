@@ -21,7 +21,7 @@ impl Scene {
     pub fn trace(&self, ray: &Ray) -> Option<HitRecord> {
         const T_MIN: f32 = 0.001;
 
-        let mut closest_distance = std::f32::MAX;
+        let mut closest_distance = f32::MAX;
         let mut closest_record   = None;
 
         if let Some(bvh_root) = self.bvh_root.as_ref() {

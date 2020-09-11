@@ -68,10 +68,10 @@ impl Traceable for Sphere {
         None
     }
 
-    fn bounding_box(&self) -> Option<AABB> {
-        Some(AABB::new(
+    fn bounding_box(&self) -> AABB {
+        AABB::new(
             self.center - Vec3::fill(self.radius),
             self.center + Vec3::fill(self.radius),
-        ))
+        )
     }
 }

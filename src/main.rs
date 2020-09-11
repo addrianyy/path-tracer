@@ -220,10 +220,10 @@ fn trace_ray(ray: &Ray, scene: &Scene, rng: &mut Rng) -> Vec3 {
 }
 
 struct Pixels {
-    pixels:     Vec<u8>,
-    fb_pixels:  Option<Vec<u32>>,
-    width:      usize,
-    height:     usize,
+    pixels:    Vec<u8>,
+    fb_pixels: Option<Vec<u32>>,
+    width:     usize,
+    height:    usize,
 }
 
 impl Pixels {

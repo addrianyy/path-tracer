@@ -6,13 +6,13 @@ use std::cmp::Ordering;
 
 pub enum BvhNode {
     Leaf(AABB, Box<DynTraceable>),
-    Split(AABB, Box<BvhNode>, Box<BvhNode>),
+    Split(AABB, Box<(BvhNode, BvhNode)>),
 }
 
 impl BvhNode {
     fn construct(objects: &mut [Option<Box<DynTraceable>>]) -> BvhNode {
         macro_rules! get_bbox {
-            ($object:expr) => { $object.as_ref().unwrap().bounding_box().unwrap() }
+            ($object:expr) => { $object.as_ref().unwrap().bounding_box() }
         }
 
         match objects.len() {
@@ -20,7 +20,7 @@ impl BvhNode {
             1 => {
                 let object = objects[0].take().unwrap();
 
-                BvhNode::Leaf(object.bounding_box().unwrap(), object)
+                BvhNode::Leaf(object.bounding_box(), object)
             }
             _ => {
                 let get_enclosing_bbox = |objects: &[Option<Box<DynTraceable>>]| {
@@ -57,7 +57,7 @@ impl BvhNode {
 
                 let split_index = {
                     let mut lowest_cost_index = 0;
-                    let mut lowest_cost       = std::f32::MAX;
+                    let mut lowest_cost       = f32::MAX;
 
                     for i in 1..objects.len() {
                         let get_cost = |objects| {
@@ -85,7 +85,7 @@ impl BvhNode {
                 let right  = BvhNode::construct(right);
                 let bounds = AABB::enclosing_box(&left.bounding_box(), &right.bounding_box());
 
-                BvhNode::Split(bounds, Box::new(left), Box::new(right))
+                BvhNode::Split(bounds, Box::new((left, right)))
             }
         }
     }
@@ -106,8 +106,11 @@ impl BvhNode {
     pub fn trace(&self, ray: &Ray, inv_direction: Vec3,
                  min_t: f32, max_t: f32) -> Option<HitRecord> {
         match self {
-            BvhNode::Leaf(_, traceable)    => traceable.trace(ray, min_t, max_t),
-            BvhNode::Split(_, left, right) => {
+            BvhNode::Leaf(_, traceable) => traceable.trace(ray, min_t, max_t),
+            BvhNode::Split(_, split)    => {
+                let left  = &split.0;
+                let right = &split.1;
+
                 if self.bounding_box().intersect(ray, inv_direction, min_t, max_t) {
                     match left.trace(ray, inv_direction, min_t, max_t) {
                         Some(record) => match right.trace(ray, inv_direction, min_t, record.t) {
