@@ -270,7 +270,7 @@ impl Pixels {
 fn main() {
     let width  = 3840 - 200;
     let height = 2160 - 200;
-    let samples_per_axis = 16;
+    let samples_per_axis = 32;
 
     let camera = Camera::new(
         Vec3::new(12.0, 2.0, 3.0),
@@ -289,7 +289,7 @@ fn main() {
 
     scene.construct_bvh();
 
-    let processors        = processors::logical();
+    let processors        = processors::physical();
     let core_count        = processors.len();
     let total_pixel_count = width * height;
 
@@ -307,12 +307,12 @@ fn main() {
         None
     };
 
-    for processor in processors {
+    for _processor in processors {
         let state  = state.clone();
         let sender = sender.clone();
 
         threads.push(thread::spawn(move || {
-            processors::pin_to_processor(&processor);
+            //processors::pin_to_processor(&processor);
 
             let mut rng = Rng::new();
 
