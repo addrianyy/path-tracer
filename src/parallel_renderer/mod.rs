@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex, Condvar, Barrier};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 type Coordinate            = usize;
-type WorkCallback<C, P, L> = dyn Fn(&C, &mut L, Coordinate, &mut [P]) + 'static + Send + Sync;
 type WorkItem              = PixelRange;
+type WorkCallback<C, P, L> = dyn Fn(&C, &mut L, Coordinate, &mut [P]) + 'static + Send + Sync;
 
 #[derive(Copy, Clone)]
 struct PixelRange {

@@ -71,6 +71,8 @@ fn reporter(stats: &Statistics, pixel_count: usize) {
 }
 
 fn main() {
+    assert!(is_x86_feature_detected!("avx2"), "This CPU doesn't support AVX2 which is required.");
+
     let width   = 3840 - 200;
     let height  = 2160 - 200;
     let samples = 16;
