@@ -1,4 +1,4 @@
-use crate::{Vec3, Ray};
+use super::{Vec3, Ray};
 
 #[derive(Clone)]
 pub struct Camera {
@@ -6,10 +6,14 @@ pub struct Camera {
     origin:            Vec3,
     horizontal:        Vec3,
     vertical:          Vec3,
+    width:             usize,
+    height:            usize,
 }
 
 impl Camera {
-    pub fn new(eyes: Vec3, target: Vec3, up: Vec3, fov: f32, aspect_ratio: f32) -> Self {
+    pub fn new(eyes: Vec3, target: Vec3, up: Vec3, fov: f32, width: usize, height: usize) -> Self {
+        let aspect_ratio = width as f32 / height as f32;
+
         let half_height = (fov.to_radians() / 2.0).tan();
         let half_width  = half_height * aspect_ratio;
 
@@ -20,6 +24,8 @@ impl Camera {
         let lower_left_corner = eyes - u * half_width - v * half_height - w;
 
         Self {
+            width,
+            height,
             lower_left_corner,
             origin:     eyes,
             horizontal: u * 2.0 * half_width,
@@ -36,4 +42,10 @@ impl Camera {
         // will significantly degrade the performance.
         Ray::new_normalized(self.origin, direction)
     }
+
+    #[inline(always)]
+    pub fn width(&self) -> usize { self.width }
+
+    #[inline(always)]
+    pub fn height(&self) -> usize { self.height }
 }

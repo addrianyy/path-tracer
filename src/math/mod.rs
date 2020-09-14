@@ -1,10 +1,12 @@
 mod vec;
 mod ray;
 mod aabb;
+mod camera;
 
 pub use vec::Vec3;
 pub use ray::Ray;
 pub use aabb::AABB;
+pub use camera::Camera;
 
 use crate::rng::Rng;
 

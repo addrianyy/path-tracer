@@ -1,6 +1,9 @@
+pub mod generators;
+mod bvh;
+
 use crate::{Vec3, Ray};
 use crate::traceable::{HitRecord, Traceable, DynTraceable};
-use crate::bvh::BvhNode;
+use bvh::BvhNode;
 
 use std::time::Instant;
 use std::io::{self, Write};
