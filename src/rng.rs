@@ -53,6 +53,12 @@ impl Rng {
     }
 }
 
+impl Default for Rng {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub trait Random: Sized {
     fn rand(rng: &mut Rng) -> Self;
     fn rand_range(rng: &mut Rng, min: Self, max: Self) -> Self;

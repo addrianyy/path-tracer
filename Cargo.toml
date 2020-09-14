@@ -8,5 +8,4 @@ edition = "2018"
 debug = true
 
 [dependencies]
-minifb = "0.18"
 image = "0.23"

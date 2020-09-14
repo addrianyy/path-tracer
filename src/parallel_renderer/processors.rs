@@ -109,7 +109,13 @@ mod linux {
         processors
     }
 
-    pub fn pin_to_processor(processor: &Processor) {
+    pub fn pin_to_processor(processor: &Processor, force: bool) {
+        // Linux scheduler is pretty good so unless caller forced us to pin to the processor
+        // don't do it..
+        if !force {
+            return;
+        }
+
         const DEFAULT_SET_SIZE: usize = 1024;
         const USIZE_BITS:       usize = std::mem::size_of::<usize>() * 8;
 
@@ -264,7 +270,9 @@ mod windows {
         processors
     }
 
-    pub fn pin_to_processor(processor: &Processor) {
+    pub fn pin_to_processor(processor: &Processor, _force: bool) {
+        // Windows scheduler isn't very good so always pin to the specified processor.
+
         extern {
             fn SetThreadGroupAffinity(thread: usize, group_affinity: *const GROUP_AFFINITY,
                                       previous_group_affinity: *mut GROUP_AFFINITY) -> i32;

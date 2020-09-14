@@ -9,7 +9,7 @@ mod rng;
 mod bvh;
 mod scene;
 mod camera;
-mod processors;
+mod parallel_renderer;
 
 pub use math::{Vec3, Ray};
 
@@ -19,90 +19,27 @@ use camera::Camera;
 use traceable::Sphere;
 use material::{Metal, Lambertian, Dielectric};
 use texture::PictureTexture;
+use parallel_renderer::ParallelRenderer;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use std::io::{self, Write};
-use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use minifb::{Window, WindowOptions};
 use image::RgbImage;
-
-const RANGES_PER_THREAD: usize = 64;
-const CHANNELS:          usize = 3;
-const PROGRESS_STEP:     usize = 8192;
-
-#[derive(Copy, Clone)]
-struct PixelRange {
-    start: usize,
-    size:  usize,
-}
-
-struct PixelQueue {
-    queue: Vec<PixelRange>,
-    index: AtomicUsize,
-}
-
-impl PixelQueue {
-    fn new(queue: Vec<PixelRange>) -> Self {
-        Self {
-            queue,
-            index: AtomicUsize::new(0),
-        }
-    }
-
-    fn pop(&self) -> Option<PixelRange> {
-        let index = self.index.fetch_add(1, Ordering::SeqCst);
-
-        if index < self.queue.len() {
-            Some(self.queue[index])
-        } else {
-            None
-        }
-    }
-}
 
 struct State {
     scene:       Scene,
     camera:      Camera,
-    queue:       PixelQueue,
     pixels_done: AtomicUsize,
 }
 
 impl State {
-    fn new(scene: Scene, camera: Camera, pixel_count: usize, threads: usize) -> Self {
-        let queue = {
-            let range_count      = threads * RANGES_PER_THREAD;
-            let pixels_per_range = (pixel_count + range_count - 1) / range_count;
-
-            let mut ranges = Vec::with_capacity(range_count);
-
-            for i in 0..range_count {
-                let start = i * pixels_per_range;
-
-                let outside_screen = if i + 1 == range_count {
-                    (pixels_per_range * range_count).checked_sub(pixel_count).unwrap()
-                } else {
-                    0
-                };
-
-                let size = pixels_per_range.checked_sub(outside_screen).unwrap();
-
-                ranges.push(PixelRange {
-                    start,
-                    size,
-                });
-            }
-
-            PixelQueue::new(ranges)
-        };
-
+    fn new(scene: Scene, camera: Camera) -> Self {
         Self {
             scene,
             camera,
-            queue,
             pixels_done: AtomicUsize::new(0),
         }
     }
@@ -219,54 +156,6 @@ fn trace_ray(ray: &Ray, scene: &Scene, rng: &mut Rng) -> Vec3 {
     color * current_attenuation
 }
 
-struct Pixels {
-    pixels:    Vec<u8>,
-    fb_pixels: Option<Vec<u32>>,
-    width:     usize,
-    height:    usize,
-}
-
-impl Pixels {
-    pub fn new(width: usize, height: usize, window: bool) -> Self {
-        let pixel_count = width * height;
-
-        let fb_pixels = if window {
-            Some(vec![0; pixel_count])
-        } else {
-            None
-        };
-
-        Self {
-            pixels: vec![0; pixel_count * CHANNELS],
-            fb_pixels,
-            width,
-            height,
-        }
-    }
-
-    pub fn add_fragment(&mut self, (start_pixel, buffer): (usize, Vec<u8>)) {
-        self.pixels[start_pixel * CHANNELS..][..buffer.len()].copy_from_slice(&buffer);
-
-        if let Some(fb_pixels) = self.fb_pixels.as_mut() {
-            for (offset, chunk) in buffer.chunks(3).enumerate() {
-                fb_pixels[start_pixel + offset] =
-                    u32::from_be_bytes([0, chunk[0], chunk[1], chunk[2]]);
-            }
-        }
-    }
-
-    pub fn update_window_framebuffer(&mut self, window: &mut Window) {
-        let framebuffer = &self.fb_pixels.as_ref().unwrap();
-
-        window.update_with_buffer(framebuffer, self.width, self.height)
-            .expect("Failed to update window framebuffer.");
-    }
-
-    pub fn disable_window(&mut self) {
-        self.fb_pixels = None;
-    }
-}
-
 fn main() {
     let width  = 3840 - 200;
     let height = 2160 - 200;
@@ -280,8 +169,6 @@ fn main() {
         width as f32 / height as f32,
     );
 
-    let preview_window = std::env::args().nth(1) == Some("preview".to_string());
-
     let mut scene = Scene::new();
 
     load_scene(&mut scene);
@@ -289,151 +176,106 @@ fn main() {
 
     scene.construct_bvh();
 
-    let processors        = processors::logical();
-    let core_count        = processors.len();
-    let total_pixel_count = width * height;
+    let state = Arc::new(State::new(scene, camera));
 
-    let (sender, receiver) = mpsc::channel();
-    let state              = Arc::new(State::new(scene, camera, total_pixel_count, core_count));
+    let mut renderer = ParallelRenderer::new();
+    let mut buffer   = vec![[0u8; 3]; width * height];
 
-    println!("Raytracing using {} threads...", core_count);
-
-    let mut threads = Vec::with_capacity(core_count);
     let start_time  = Instant::now();
 
-    let mut window = if preview_window {
-        Some(Window::new("path-tracer", width, height, WindowOptions::default()).unwrap())
-    } else {
-        None
-    };
+    let reporter = {
+        let state = state.clone();
 
-    for processor in processors {
-        let state  = state.clone();
-        let sender = sender.clone();
+        thread::spawn(move || {
+            let pixel_count = width * height;
 
-        threads.push(thread::spawn(move || {
-            processors::pin_to_processor(&processor);
+            loop {
+                let pixels_done = state.pixels_done.load(Ordering::Relaxed);
+                let progress    = pixels_done as f64 / pixel_count as f64;
 
-            let mut rng = Rng::new();
+                let elapsed = start_time.elapsed().as_secs_f64();
 
-            while let Some(range) = state.queue.pop() {
-                let pixel_count = range.size;
-                let start_pixel = range.start;
+                let max_bars = 50;
+                let bars     = (progress * max_bars as f64) as u64;
 
-                let mut pixels = Vec::with_capacity(pixel_count * CHANNELS);
+                print!("\r  [");
 
-                for i in 0..pixel_count {
-                    let x = (i + start_pixel) % width;
-                    let y = (i + start_pixel) / width;
-
-                    let mut color_sum = Vec3::zero();
-
-                    for sx in 0..samples_per_axis {
-                        for sy in 0..samples_per_axis {
-                            let x = x as f32 + (sx as f32 / (samples_per_axis - 1) as f32);
-                            let y = y as f32 + (sy as f32 / (samples_per_axis - 1) as f32);
-
-                            let u = x / width as f32;
-                            let v = 1.0 - (y / height as f32);
-
-                            let ray   = state.camera.ray(u, v);
-                            let color = trace_ray(&ray, &state.scene, &mut rng);
-
-                            color_sum += color;
-                        }
+                for i in 0..max_bars {
+                    if i < bars {
+                        print!("=");
+                    } else {
+                        print!("-");
                     }
-
-                    if i > 0 {
-                        if i % PROGRESS_STEP == 0 {
-                            state.pixels_done.fetch_add(PROGRESS_STEP, Ordering::Relaxed);
-                        } else if i == pixel_count - 1 {
-                            state.pixels_done.fetch_add(pixel_count % PROGRESS_STEP,
-                                                        Ordering::Relaxed);
-                        }
-                    }
-
-                    let samples   = samples_per_axis * samples_per_axis;
-                    let color     = (color_sum / samples as f32).sqrt() * Vec3::fill(255.0);
-                    let (r, g, b) = color.extract();
-
-                    pixels.push(r as u8);
-                    pixels.push(g as u8);
-                    pixels.push(b as u8);
                 }
 
-                sender.send((start_pixel, pixels)).unwrap();
+                print!("] {:.1}% | {:.3}s elapsed", progress * 100.0, elapsed);
+
+                if pixels_done == pixel_count {
+                    println!();
+                    break;
+                }
+
+                io::stdout().flush().unwrap();
+                thread::sleep(Duration::from_millis(100));
             }
-        }));
+        })
+    };
+
+    renderer.render(&state, &mut buffer, move |state, rng, start_pixel, pixels| {
+        const PROGRESS_STEP: usize = 8192;
+
+        let pixel_count = pixels.len();
+
+        for (i, pixel) in pixels.iter_mut().enumerate() {
+            let x = (i + start_pixel) % width;
+            let y = (i + start_pixel) / width;
+
+            let mut color_sum = Vec3::zero();
+
+            for sx in 0..samples_per_axis {
+                let x = x as f32 + (sx as f32 / (samples_per_axis - 1) as f32);
+                let u = x / width as f32;
+
+                for sy in 0..samples_per_axis {
+                    let y = y as f32 + (sy as f32 / (samples_per_axis - 1) as f32);
+                    let v = 1.0 - (y / height as f32);
+
+                    let ray   = state.camera.ray(u, v);
+                    let color = trace_ray(&ray, &state.scene, rng);
+
+                    color_sum += color;
+                }
+            }
+
+            if i > 0 {
+                if i % PROGRESS_STEP == 0 {
+                    state.pixels_done.fetch_add(PROGRESS_STEP, Ordering::Relaxed);
+                } else if i == pixel_count - 1 {
+                    state.pixels_done.fetch_add(pixel_count % PROGRESS_STEP,
+                                                Ordering::Relaxed);
+                }
+            }
+
+            let samples   = samples_per_axis * samples_per_axis;
+            let color     = (color_sum / samples as f32).sqrt() * Vec3::fill(255.0);
+            let (r, g, b) = color.extract();
+
+            *pixel = [r as u8, g as u8, b as u8];
+        }
+    });
+
+    reporter.join().unwrap();
+
+    let mut image = Vec::with_capacity(width * height);
+
+    for &[r, g, b] in &buffer {
+        image.push(r);
+        image.push(g);
+        image.push(b);
     }
 
-    drop(sender);
-
-    let mut pixels = Pixels::new(width, height, window.is_some());
-
-    loop {
-        while let Ok(fragment) = receiver.try_recv() {
-            pixels.add_fragment(fragment);
-        }
-
-        let pixels_done = state.pixels_done.load(Ordering::Relaxed);
-        let progress    = pixels_done as f64 / total_pixel_count as f64;
-
-        let elapsed = start_time.elapsed().as_secs_f64();
-
-        let max_bars = 50;
-        let bars     = (progress * max_bars as f64) as u64;
-
-        print!("\r  [");
-
-        for i in 0..max_bars {
-            if i < bars {
-                print!("=");
-            } else {
-                print!("-");
-            }
-        }
-
-        let progress_per_second = progress / elapsed;
-        let left                = (1.0 - progress) / progress_per_second;
-
-        print!("] {:.1}% | {:.3}s elapsed | {:.1}s left", progress * 100.0, elapsed, left);
-
-        if pixels_done == total_pixel_count {
-            println!();
-            break;
-        }
-
-        if let Some(wnd) = window.as_mut() {
-            pixels.update_window_framebuffer(wnd);
-
-            if !wnd.is_open() {
-                window = None;
-                pixels.disable_window();
-            }
-        }
-
-        io::stdout().flush().unwrap();
-        thread::sleep(Duration::from_millis(100));
-    }
-
-    for fragment in receiver {
-        pixels.add_fragment(fragment);
-    }
-
-    RgbImage::from_raw(width as u32, height as u32, std::mem::take(&mut pixels.pixels))
+    RgbImage::from_raw(width as u32, height as u32, image)
         .expect("Failed to create image buffer for the PNG.")
         .save("output.png")
         .expect("Failed to save output image.");
-
-    for thread in threads {
-        thread.join().unwrap();
-    }
-
-    if let Some(wnd) = window.as_mut() {
-        pixels.update_window_framebuffer(wnd);
-
-        while wnd.is_open() {
-            wnd.update();
-        }
-    }
 }
