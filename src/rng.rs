@@ -2,15 +2,22 @@ pub struct Rng(u64);
 
 impl Rng {
     pub fn new() -> Self {
-        let seed = loop {
-            let mut seed = 0;
-            
-            let result = unsafe {
-                std::arch::x86_64::_rdseed64_step(&mut seed)
-            };
+        let seed = if is_x86_feature_detected!("rdseed") {
+            loop {
+                let mut seed = 0;
 
-            if result == 1 {
-                break seed;
+                let result = unsafe {
+                    std::arch::x86_64::_rdseed64_step(&mut seed)
+                };
+
+                if result == 1 {
+                    break seed;
+                }
+            }
+        } else {
+            unsafe {
+                // Hopefully "random" enough.
+                std::arch::x86_64::_rdtsc()
             }
         };
 
